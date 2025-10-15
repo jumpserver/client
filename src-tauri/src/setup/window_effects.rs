@@ -1,11 +1,12 @@
 use log::{error, info};
 use std::error::Error;
 use tauri::WebviewWindow;
-use window_vibrancy::{self, NSVisualEffectMaterial};
+use window_vibrancy;
 
 /// 为 macOS 窗口应用毛玻璃效果
 #[cfg(target_os = "macos")]
 pub fn apply_mac_vibrancy(win: &WebviewWindow) -> Result<(), Box<dyn Error>> {
+    use window_vibrancy::NSVisualEffectMaterial;
     let show_vibrancy =
         window_vibrancy::apply_vibrancy(&win, NSVisualEffectMaterial::FullScreenUI, None, None);
 

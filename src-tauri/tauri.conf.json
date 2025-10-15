@@ -3,7 +3,8 @@
 		"active": true,
 		"targets": "all",
 		"icon": [
-			"icons/JumpServerClient.icns"
+			"icons/icon.ico",
+			"icons/icon.icns"
 		],
 		"resources": [
 			"resources/bin/"
