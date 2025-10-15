@@ -13,9 +13,9 @@ CLIENTBUILD=CGO_ENABLED=0 go build -trimpath
 CURRENT_OS := $(shell go env GOOS)
 CURRENT_ARCH := $(shell go env GOARCH)
 
-# 默认目标：只构建当前平台
+# 默认目标：构建并安装当前平台
 .PHONY: default
-default: build-current
+default: build-current install
 
 # 构建当前平台
 .PHONY: build-current
@@ -76,24 +76,41 @@ build-all:
 	@cp $(BASEPATH)/putty.exe $(BUILDDIR)/windows/
 	@cp $(BASEPATH)/pkg/autoit/*.dll $(BUILDDIR)/windows/
 	
-	@echo "Copying to Tauri resources..."
-	@mkdir -p $(BASEPATH)/../src-tauri/resources/bin/
-	@cp -R $(BUILDDIR)/* $(BASEPATH)/../src-tauri/resources/bin/
-	@cp $(BASEPATH)/config.json $(BASEPATH)/../src-tauri/resources/bin/
-	
 	@echo "Build completed for all platforms!"
+
+# 安装到 Tauri resources 目录 - 只复制当前平台
+.PHONY: install
+install:
+	@echo "Installing Go client for current platform: $(CURRENT_OS)/$(CURRENT_ARCH)"
+	@mkdir -p $(BASEPATH)/../src-tauri/resources/bin/
+	@if [ -d "$(BUILDDIR)/$(CURRENT_OS)-$(CURRENT_ARCH)" ]; then \
+		echo "Copying $(CURRENT_OS)-$(CURRENT_ARCH) files..."; \
+		cp -R $(BUILDDIR)/$(CURRENT_OS)-$(CURRENT_ARCH) $(BASEPATH)/../src-tauri/resources/bin/; \
+	elif [ "$(CURRENT_OS)" = "windows" ] && [ -d "$(BUILDDIR)/windows" ]; then \
+		echo "Copying Windows files..."; \
+		cp -R $(BUILDDIR)/windows $(BASEPATH)/../src-tauri/resources/bin/; \
+	else \
+		echo "Error: No build files found for $(CURRENT_OS)/$(CURRENT_ARCH)"; \
+		echo "Available platforms:"; \
+		ls -la $(BUILDDIR)/ 2>/dev/null || echo "No build directory found"; \
+		exit 1; \
+	fi
+	@cp $(BASEPATH)/config.json $(BASEPATH)/../src-tauri/resources/bin/
+	@echo "Install completed!"
 
 # 帮助信息
 .PHONY: help
 help:
 	@echo "Available targets:"
-	@echo "  make           - Build for current platform only (default)"
-	@echo "  make build-client - Build for current platform only"
+	@echo "  make           - Build and install current platform (default)"
+	@echo "  make build-client - Build and install current platform"
+	@echo "  make build-current - Build current platform only (no install)"
 	@echo "  make build-all - Build for all platforms (darwin, windows, linux)"
+	@echo "  make install   - Install current platform files to Tauri resources"
 	@echo "  make help      - Show this help message"
 	@echo ""
 	@echo "Current platform: $(CURRENT_OS)/$(CURRENT_ARCH)"
 
-# build-client 就是 build-current
+# build-client 就是 build-current + install
 .PHONY: build-client
-build-client: build-current
+build-client: build-current install
