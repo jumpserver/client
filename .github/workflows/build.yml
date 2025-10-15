@@ -7,9 +7,8 @@ on:
   push:
     branches:
       - master
-      - release-test
     tags:
-      - 'v*'  # 添加对标签的监听，所有以v开头的标签都会触发构建
+      - 'v*'  # 只有正式版本标签才触发构建
 
 env:
   # Tauri 自动更新签名密钥
@@ -50,8 +49,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -97,7 +94,8 @@ jobs:
       - name: Build frontend
         run: pnpm generate
 
-      - name: Generate latest.json
+      - name: Generate latest.json (only for tags)
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           cat > latest.json << EOF
           {
@@ -129,15 +127,7 @@ jobs:
           }
           EOF
 
-      - name: Build Tauri app (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: pnpm tauri:build
-        env:
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-
-      - name: Build Tauri app (macOS)
-        if: matrix.os == 'macos-14'
+      - name: Build Tauri app
         run: pnpm tauri:build
         env:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
@@ -147,43 +137,8 @@ jobs:
           XCODE_APP_LOADER_PASSWORD: ${{ secrets.XCODE_APP_LOADER_PASSWORD }}
           BUILD_CERTIFICATE_BASE64: ${{ secrets.CSC_LINK }}
           P12_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-
-      - name: Build Tauri app (Windows)
-        if: matrix.os == 'windows-latest'
-        run: pnpm tauri:build
-        env:
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-
-      - name: Upload artifacts (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-app
-          path: |
-            src-tauri/target/release/bundle/deb/*.deb
-            src-tauri/target/release/bundle/rpm/*.rpm
-            src-tauri/target/release/bundle/appimage/*.AppImage
-
-      - name: Upload artifacts (macOS)
-        if: matrix.os == 'macos-14'
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-app
-          path: |
-            src-tauri/target/release/bundle/dmg/*.dmg
-            src-tauri/target/release/bundle/macos/*.app
-
-      - name: Upload artifacts (Windows)
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-app
-          path: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/msi/*.msi
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
