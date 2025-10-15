@@ -25,15 +25,12 @@ env:
   CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
 
 jobs:
-  build:
-    name: build tauri app
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-14, windows-latest]
-
+  pre-build:
+    name: pre-build go client
+    runs-on: ubuntu-latest
+    outputs:
+      go-client-artifacts: ${{ steps.upload-go-client.outputs.artifact-name }}
+    
     steps:
       - name: Check out git repository
         uses: actions/checkout@v4
@@ -43,9 +40,42 @@ jobs:
         with:
           go-version: '1.21'
 
-      - name: Build Go client
-        run: make build-client
+      - name: Build Go client for all platforms
+        run: make build-all
         working-directory: go-client
+
+      - name: Upload Go client artifacts
+        id: upload-go-client
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-client-binaries
+          path: go-client/build/
+          retention-days: 1
+
+  build:
+    name: build tauri app
+    runs-on: ${{ matrix.os }}
+    needs: pre-build
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest, ubuntu-latest]
+
+    steps:
+      - name: Check out git repository
+        uses: actions/checkout@v4
+
+      - name: Download Go client artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: go-client-binaries
+          path: go-client/build/
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -135,7 +165,7 @@ jobs:
   release:
     name: create release
     runs-on: ubuntu-latest
-    needs: build
+    needs: [pre-build, build]
     if: startsWith(github.ref, 'refs/tags/')
     
     steps:
