@@ -168,6 +168,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          draft: true
           files: |
             latest.json
             artifacts/ubuntu-latest-app/*.deb
