@@ -39,7 +39,14 @@
 	"productName": "JumpServerClient",
 	"version": "3.1.0",
 	"identifier": "",
-	"plugins": {},
+	"plugins": {
+		"updater": {
+			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ0NDhCRUVCN0Y5M0UwMTcKUldRWDRKTi82NzVJUkh2cW5xeUtKYTRZYkErU1ZPZkNramNXMjlRQWVmdnVtVEY0dk5RcDIvZ2IK",
+			"endpoints": [
+				"https://github.com/jumpserver/clients/releases/download/{{current_version}}/JumpServerClient_{{current_version}}_{{target}}.{{ext}}"
+			]
+		}
+	},
 	"app": {
 		"macOSPrivateApi": true,
 		"windows": [

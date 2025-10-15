@@ -70,7 +70,7 @@ const debouncedSidebarSearch = useDebounceFn(emitSearch, 200);
       width: collapse ? '72px' : '220px'
     }"
   >
-    <section class="flex items-center justify-end w-full px-4 h-12">
+    <section class="flex items-center justify-end w-full px-3 h-12">
       <UButton
         v-if="!collapse"
         color="neutral"
@@ -82,7 +82,7 @@ const debouncedSidebarSearch = useDebounceFn(emitSearch, 200);
       />
     </section>
 
-    <div v-show="!collapse" class="px-4 py-2">
+    <div v-show="!collapse" class="px-3 py-2">
       <UInput
         v-model="sidebarSearch"
         clearable
@@ -112,7 +112,7 @@ const debouncedSidebarSearch = useDebounceFn(emitSearch, 200);
       </UInput>
     </div>
 
-    <div class="px-4 py-0 flex-1 overflow-auto menu">
+    <div class="px-3 py-0 flex-1 overflow-auto menu">
       <UNavigationMenu
         orientation="vertical"
         :items="sideBarItems"
