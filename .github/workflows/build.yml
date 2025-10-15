@@ -199,14 +199,6 @@ jobs:
               "windows-x86_64": {
                 "signature": "",
                 "url": "https://github.com/jumpserver/clients/releases/download/${{ github.ref_name }}/JumpServerClient_${{ github.ref_name }}_x64.msi"
-              },
-              "linux-x86_64": {
-                "signature": "",
-                "url": "https://github.com/jumpserver/clients/releases/download/${{ github.ref_name }}/JumpServerClient_${{ github.ref_name }}_x86_64.AppImage"
-              },
-              "linux-aarch64": {
-                "signature": "",
-                "url": "https://github.com/jumpserver/clients/releases/download/${{ github.ref_name }}/JumpServerClient_${{ github.ref_name }}_aarch64.AppImage"
               }
             }
           }' > latest.json
@@ -217,9 +209,6 @@ jobs:
           draft: true
           files: |
             latest.json
-            artifacts/ubuntu-latest-app/*.deb
-            artifacts/ubuntu-latest-app/*.rpm
-            artifacts/ubuntu-latest-app/*.AppImage
             artifacts/macos-14-app/*.dmg
             artifacts/macos-14-app/*.app
             artifacts/windows-latest-app/*.exe
