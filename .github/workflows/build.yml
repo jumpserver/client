@@ -101,17 +101,6 @@ jobs:
         run: |
           brew install create-dmg
 
-      - name: Install WiX Toolset (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          # Download and install WiX Toolset
-          $wixUrl = "https://github.com/wixtoolset/wix3/releases/download/wix3112rtm/wix311.exe"
-          $wixInstaller = "$env:TEMP\wix311.exe"
-          Invoke-WebRequest -Uri $wixUrl -OutFile $wixInstaller
-          Start-Process -FilePath $wixInstaller -ArgumentList "/quiet" -Wait
-          # Add WiX to PATH
-          $wixPath = "${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin"
-          echo "$wixPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -211,7 +200,6 @@ jobs:
             latest.json
             artifacts/macos-14-app/*.dmg
             artifacts/macos-14-app/*.app
-            artifacts/windows-latest-app/*.exe
             artifacts/windows-latest-app/*.msi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

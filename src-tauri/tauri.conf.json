@@ -1,7 +1,7 @@
 {
 	"bundle": {
 		"active": true,
-		"targets": ["deb", "rpm", "appimage", "dmg", "nsis", "msi"],
+		"targets": ["dmg", "msi"],
 		"icon": [
 			"icons/icon.ico",
 			"icons/icon.icns"
