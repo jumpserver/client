@@ -57,7 +57,6 @@ jobs:
     needs: pre-build
     permissions:
       contents: write
-      releases: write
     strategy:
       fail-fast: false
       matrix:
@@ -129,7 +128,6 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
-      releases: write
 
     steps:
       - name: Check out git repository
