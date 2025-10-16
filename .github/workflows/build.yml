@@ -54,14 +54,23 @@ jobs:
 
   build:
     name: build tauri app
-    runs-on: ${{ matrix.os }}
     needs: pre-build
-
-    strategy:
+    permissions:
+      contents: write
+ .  strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, windows-latest]
+        include:
+          - platform: 'macos-latest' # for Arm based macs (M1 and above).
+            args: '--target aarch64-apple-darwin'
+          - platform: 'macos-latest' # for Intel based macs.
+            args: '--target x86_64-apple-darwin'
+          - platform: 'ubuntu-22.04' # for Tauri v1 you could replace this with ubuntu-20.04.
+            args: ''
+          - platform: 'windows-latest'
+            args: ''
 
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Check out git repository
         uses: actions/checkout@v4
@@ -72,23 +81,20 @@ jobs:
           name: go-client-binaries
           path: go-client/build/
 
-      - name: Setup Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: "1.25"
-
       - name: Install Go client for current platform
         run: make install
         working-directory: go-client
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "23"
-          cache: "pnpm"
+
+     - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # Those targets are only used on macos runners so it's in an `if` to slightly speed up windows and linux builds.
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Install system dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
@@ -96,88 +102,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
 
-      - name: Install system dependencies (macOS)
-        if: matrix.os == 'macos-14'
-        run: |
-          brew install create-dmg
-
-      - name: Install WiX Toolset (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          # Enable VBSCRIPT feature required for MSI packages
-          Enable-WindowsOptionalFeature -Online -FeatureName "VBScript" -All
-          # Install WiX Toolset using winget (Windows Package Manager)
-          winget install Microsoft.WiXToolset
-          # Refresh environment variables
-          refreshenv
-          # Verify installation
-          candle.exe -?
-          light.exe -?
-          # Get WiX installation path
-          $wixPath = (Get-Command candle.exe).Source | Split-Path -Parent
-          echo "WiX installed at: $wixPath"
-          # Set environment variables for Tauri 2.0
-          echo "WIX=$wixPath" | Out-File -FilePath $env:GITHUB_ENV -Append
-          echo "WIX_ROOT=$wixPath" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Cache Rust dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            src-tauri/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli@^2.0
-        env:
-          # Ensure WiX is available for Tauri CLI
-          WIX: C:\WixTools
-          WIX_ROOT: C:\WixTools
-
       - name: Install frontend dependencies
         run: pnpm install
 
-      - name: Build frontend
-        run: pnpm generate
-
-      - name: Verify Windows build dependencies (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          echo "Verifying Windows build dependencies..."
-          # Check WiX tools
-          candle.exe -?
-          light.exe -?
-          echo "WiX tools are working correctly"
-          # Check VBScript feature
-          $vbScript = Get-WindowsOptionalFeature -Online -FeatureName "VBScript"
-          if ($vbScript.State -eq "Enabled") {
-            echo "VBScript feature is enabled"
-          } else {
-            echo "WARNING: VBScript feature is not enabled"
-          }
-          # Check WebView2
-          $webview2 = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" -ErrorAction SilentlyContinue
-          if ($webview2) {
-            echo "WebView2 is installed: $($webview2.pv)"
-          } else {
-            echo "WebView2 will be installed by the installer"
-          }
-
-      - name: Build Tauri app (Windows)
-        if: matrix.os == 'windows-latest'
-        run: pnpm tauri:build
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
           XCODE_APP_TEAM_ID: ${{ secrets.XCODE_APP_TEAM_ID }}
@@ -187,39 +118,15 @@ jobs:
           P12_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-
-      - name: Build Tauri app (macOS)
-        if: matrix.os == 'macos-14'
-        run: pnpm tauri:build
-        env:
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-          XCODE_APP_TEAM_ID: ${{ secrets.XCODE_APP_TEAM_ID }}
-          XCODE_APP_LOADER_EMAIL: ${{ secrets.XCODE_APP_LOADER_EMAIL }}
-          XCODE_APP_LOADER_PASSWORD: ${{ secrets.XCODE_APP_LOADER_PASSWORD }}
-          BUILD_CERTIFICATE_BASE64: ${{ secrets.CSC_LINK }}
-          P12_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          # Windows-specific environment variables
-          WIX: C:\WixTools
-          WIX_ROOT: C:\WixTools
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}-app
-          path: |
-            src-tauri/target/release/bundle/deb/*.deb
-            src-tauri/target/release/bundle/rpm/*.rpm
-            src-tauri/target/release/bundle/appimage/*.AppImage
-            src-tauri/target/release/bundle/dmg/*.dmg
-            src-tauri/target/release/bundle/macos/*.app
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/msi/*.msi
+          tagName: ${{ github.ref_name }}
+          releaseName: "JumpServer Client v__VERSION__"
+          releaseBody: "See the assets to download this version and install."
+          releaseDraft: true
+          prerelease: false
 
   release:
-    name: create release
+    name: create latest.json
     runs-on: ubuntu-latest
     needs: [pre-build, build]
     if: startsWith(github.ref, 'refs/tags/')
@@ -227,11 +134,6 @@ jobs:
     steps:
       - name: Check out git repository
         uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
 
       - name: Generate latest.json
         run: |
@@ -259,15 +161,9 @@ jobs:
             }
           }' > latest.json
 
-      - name: Create Release
+      - name: Upload latest.json to release
         uses: softprops/action-gh-release@v1
         with:
-          draft: true
-          files: |
-            latest.json
-            artifacts/macos-14-app/*.dmg
-            artifacts/macos-14-app/*.app
-            artifacts/windows-latest-app/*.msi
-            artifacts/windows-latest-app/*.exe
+          files: latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
