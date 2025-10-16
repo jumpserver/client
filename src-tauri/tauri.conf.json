@@ -18,7 +18,9 @@
         "type": "embedBootstrapper"
       },
       "nsis": {
-        "installMode": "both"
+        "installMode": "both",
+        "displayLanguageSelector": true,
+        "minimumWebview2Version": "110.0.1531.0"
       }
     },
     "linux": {
@@ -34,7 +36,7 @@
   },
   "productName": "JumpServerClient",
   "version": "3.1.0",
-  "identifier": "",
+  "identifier": "com.jumpserver.client",
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ0NDhCRUVCN0Y5M0UwMTcKUldRWDRKTi82NzVJUkh2cW5xeUtKYTRZYkErU1ZPZkNramNXMjlRQWVmdnVtVEY0dk5RcDIvZ2IK",

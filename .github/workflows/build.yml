@@ -101,23 +101,13 @@ jobs:
         run: |
           brew install create-dmg
 
-      - name: Install Chocolatey (Windows)
+      - name: Install WiX Toolset (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          # Install Chocolatey package manager
-          Set-ExecutionPolicy Bypass -Scope Process -Force
-          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-          iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-          # Refresh environment variables
-          refreshenv
-          # Verify Chocolatey installation
-          choco --version
-
-      - name: Install WiX Toolset via Chocolatey (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          # Install WiX Toolset using Chocolatey
-          choco install wixtoolset --version=3.14.1 -y
+          # Enable VBSCRIPT feature required for MSI packages
+          Enable-WindowsOptionalFeature -Online -FeatureName "VBScript" -All
+          # Install WiX Toolset using winget (Windows Package Manager)
+          winget install Microsoft.WiXToolset
           # Refresh environment variables
           refreshenv
           # Verify installation
@@ -126,12 +116,9 @@ jobs:
           # Get WiX installation path
           $wixPath = (Get-Command candle.exe).Source | Split-Path -Parent
           echo "WiX installed at: $wixPath"
-          # Set environment variables
+          # Set environment variables for Tauri 2.0
           echo "WIX=$wixPath" | Out-File -FilePath $env:GITHUB_ENV -Append
           echo "WIX_ROOT=$wixPath" | Out-File -FilePath $env:GITHUB_ENV -Append
-          echo "TAURI_WIX_PATH=$wixPath" | Out-File -FilePath $env:GITHUB_ENV -Append
-          echo "WIX_BIN_PATH=$wixPath" | Out-File -FilePath $env:GITHUB_ENV -Append
-          echo "TAURI_SKIP_WIX_DOWNLOAD=true" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -164,23 +151,28 @@ jobs:
       - name: Build frontend
         run: pnpm generate
 
-      - name: Verify WiX installation (Windows)
+      - name: Verify Windows build dependencies (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          echo "Verifying WiX installation..."
+          echo "Verifying Windows build dependencies..."
+          # Check WiX tools
           candle.exe -?
           light.exe -?
           echo "WiX tools are working correctly"
-          # Get WiX path and create symlink for Tauri
-          $wixPath = (Get-Command candle.exe).Source | Split-Path -Parent
-          echo "WiX path: $wixPath"
-          # Clean any existing Tauri WiX cache
-          if (Test-Path "C:\Users\runneradmin\AppData\Local\tauri\WixTools314") {
-            Remove-Item -Recurse -Force "C:\Users\runneradmin\AppData\Local\tauri\WixTools314"
+          # Check VBScript feature
+          $vbScript = Get-WindowsOptionalFeature -Online -FeatureName "VBScript"
+          if ($vbScript.State -eq "Enabled") {
+            echo "VBScript feature is enabled"
+          } else {
+            echo "WARNING: VBScript feature is not enabled"
           }
-          # Create symlink for Tauri
-          New-Item -ItemType Directory -Force -Path "C:\Users\runneradmin\AppData\Local\tauri"
-          New-Item -ItemType SymbolicLink -Force -Path "C:\Users\runneradmin\AppData\Local\tauri\WixTools314" -Target $wixPath
+          # Check WebView2
+          $webview2 = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" -ErrorAction SilentlyContinue
+          if ($webview2) {
+            echo "WebView2 is installed: $($webview2.pv)"
+          } else {
+            echo "WebView2 will be installed by the installer"
+          }
 
       - name: Build Tauri app (Windows)
         if: matrix.os == 'windows-latest'
@@ -195,15 +187,6 @@ jobs:
           P12_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          # Windows-specific environment variables
-          WIX: C:\WixTools
-          WIX_ROOT: C:\WixTools
-          # Tell Tauri to use our WiX installation
-          TAURI_WIX_PATH: C:\WixTools
-          WIX_BIN_PATH: C:\WixTools
-          # Disable Tauri's automatic WiX download
-          TAURI_SKIP_WIX_DOWNLOAD: true
-          WIX_DOWNLOAD_URL: ""
 
       - name: Build Tauri app (macOS)
         if: matrix.os == 'macos-14'
