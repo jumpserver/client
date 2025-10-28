@@ -7,6 +7,7 @@ import SidebarFlipIcon from "~/icons/SidebarFlipIcon.vue";
 const { t } = useI18n();
 const { emit } = useEventBus();
 const { isMacOS } = usePlatform();
+// const isMacOS = false;
 
 const localePath = useLocalePath();
 const useSettingStore = useUserSettingStore();
@@ -16,8 +17,6 @@ const { collapse } = storeToRefs(useSettingStore);
 
 const isLoading = ref(false);
 const sidebarSearch = ref("");
-
-// const isMacOS = false;
 
 const sideBarItems = computed<NavigationMenuItem[]>(() => {
   return [
@@ -77,14 +76,14 @@ const debouncedSidebarSearch = useDebounceFn(emitSearch, 200);
     <div class="flex flex-col w-full">
       <!-- 折叠按钮 -->
       <div
-        class="flex justify-center items-center px-3 h-10"
+        class="flex px-3 h-10 items-center"
         :class="
           isMacOS
             ? collapse
-              ? 'mt-9'
+              ? 'mt-9 justify-center'
               : 'justify-end'
             : collapse
-            ? 'py-2'
+            ? 'py-2 justify-center mt-2'
             : 'py-2 mt-1 justify-between'
         "
       >
