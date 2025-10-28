@@ -9,9 +9,15 @@ LDFLAGS=-w -s
 
 CLIENTBUILD=CGO_ENABLED=0 go build -trimpath
 
-# 自动检测当前平台
-CURRENT_OS := $(shell go env GOOS)
-CURRENT_ARCH := $(shell go env GOARCH)
+# 自动检测当前平台 - 使用 shell 命令，不依赖 Go 环境
+CURRENT_OS := $(shell uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]' | sed 's/.*mingw.*/windows/; s/.*cygwin.*/windows/; s/.*msys.*/windows/' || echo "unknown")
+CURRENT_ARCH := $(shell uname -m 2>/dev/null | sed 's/x86_64/amd64/; s/aarch64/arm64/; s/arm64/arm64/; s/i686/386/' || echo "amd64")
+
+# Windows 环境变量检测（当 uname 不可用时）
+ifeq ($(OS),Windows_NT)
+CURRENT_OS := windows
+CURRENT_ARCH := amd64
+endif
 
 # 默认目标：构建并安装当前平台
 .PHONY: default
@@ -83,20 +89,34 @@ build-all:
 install:
 	@echo "Installing Go client for current platform: $(CURRENT_OS)/$(CURRENT_ARCH)"
 	@mkdir -p $(BASEPATH)/../src-tauri/resources/bin/
-	@if [ -d "$(BUILDDIR)/$(CURRENT_OS)-$(CURRENT_ARCH)" ]; then \
-		echo "Copying $(CURRENT_OS)-$(CURRENT_ARCH) files..."; \
-		cp -R $(BUILDDIR)/$(CURRENT_OS)-$(CURRENT_ARCH) $(BASEPATH)/../src-tauri/resources/bin/; \
-	elif [ "$(CURRENT_OS)" = "windows" ] && [ -d "$(BUILDDIR)/windows" ]; then \
-		echo "Copying Windows files..."; \
-		cp -R $(BUILDDIR)/windows $(BASEPATH)/../src-tauri/resources/bin/; \
+	@PLATFORM_DIR=""; \
+	if [ "$(CURRENT_OS)" = "darwin" ]; then \
+		if [ "$(CURRENT_ARCH)" = "arm64" ]; then \
+			PLATFORM_DIR="darwin-arm64"; \
+		else \
+			PLATFORM_DIR="darwin-amd64"; \
+		fi; \
+	elif [ "$(CURRENT_OS)" = "linux" ]; then \
+		if [ "$(CURRENT_ARCH)" = "arm64" ]; then \
+			PLATFORM_DIR="linux-arm64"; \
+		else \
+			PLATFORM_DIR="linux-amd64"; \
+		fi; \
+	elif [ "$(CURRENT_OS)" = "windows" ]; then \
+		PLATFORM_DIR="windows"; \
+	fi; \
+	echo "Looking for platform directory: $$PLATFORM_DIR"; \
+	if [ -d "$(BUILDDIR)/$$PLATFORM_DIR" ]; then \
+		echo "Copying $$PLATFORM_DIR files..."; \
+		cp -R $(BUILDDIR)/$$PLATFORM_DIR $(BASEPATH)/../src-tauri/resources/bin/; \
+		cp $(BASEPATH)/config.json $(BASEPATH)/../src-tauri/resources/bin/; \
+		echo "Install completed for $$PLATFORM_DIR!"; \
 	else \
-		echo "Error: No build files found for $(CURRENT_OS)/$(CURRENT_ARCH)"; \
+		echo "Error: No build files found for platform $$PLATFORM_DIR"; \
 		echo "Available platforms:"; \
 		ls -la $(BUILDDIR)/ 2>/dev/null || echo "No build directory found"; \
 		exit 1; \
 	fi
-	@cp $(BASEPATH)/config.json $(BASEPATH)/../src-tauri/resources/bin/
-	@echo "Install completed!"
 
 # 帮助信息
 .PHONY: help
