@@ -12,6 +12,11 @@
       "category": "databases"
     },
     {
+      "id": "macos.dbx",
+      "name": "dbx",
+      "category": "databases"
+    },
+    {
       "id": "macos.iterm",
       "name": "iterm",
       "category": "terminal"

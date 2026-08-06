@@ -12,6 +12,11 @@
       "category": "databases"
     },
     {
+      "id": "windows.dbx",
+      "name": "dbx",
+      "category": "databases"
+    },
+    {
       "id": "windows.mobaxterm",
       "name": "mobaxterm",
       "category": "terminal"

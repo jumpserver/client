@@ -1,0 +1,17 @@
+{
+  "platform": "macos",
+  "match_first": [],
+  "is_default": false,
+  "is_set": false,
+  "is_internal": false,
+  "executable": {
+    "type": "user_path",
+    "default": "/Applications/DBX.app/Contents/MacOS/dbx",
+    "required": false
+  },
+  "launch": {
+    "type": "args",
+    "template": "dbx://connection/new?name={name}&type={protocol}&user={username}&password={value}&database={dbname}&host={host}&port={port}&one_time=true"
+  },
+  "display_name": "DBX"
+}

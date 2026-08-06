@@ -162,6 +162,16 @@ func awakenDBCommand(r *Rouse, cfg *config.AppConfig) (*exec.Cmd, error) {
 	if r.Protocol == "oracle" {
 		connectMap["dbname"] = r.getUserName()
 	}
+	if appItem.Name == "dbx" {
+		switch r.Protocol {
+		case "postgresql":
+			connectMap["protocol"] = "postgres"
+		case "sqlserver":
+			connectMap["protocol"] = "mssql"
+		default:
+			connectMap["protocol"] = r.Protocol
+		}
+	}
 	if appItem.IsInternal {
 		var argFormat string
 		switch r.Protocol {
@@ -190,7 +200,7 @@ func awakenDBCommand(r *Rouse, cfg *config.AppConfig) (*exec.Cmd, error) {
 				return nil, fmt.Errorf("No database application configured or found (selected path: %s, reason: %v)", appItem.Path, err)
 			}
 		}
-		if r.Protocol == "sqlserver" {
+		if r.Protocol == "sqlserver" && appItem.Name != "dbx" {
 			connectMap["protocol"] = "mssql_jdbc_ms_new"
 		}
 		commands := getCommandFromArgs(connectMap, appItem.ArgFormat)

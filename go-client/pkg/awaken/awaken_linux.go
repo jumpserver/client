@@ -304,6 +304,16 @@ func awakenDBCommand(r *Rouse, cfg *config.AppConfig) (*exec.Cmd, error) {
 	if r.Protocol == "oracle" {
 		connectMap["dbname"] = r.getUserName()
 	}
+	if appItem.Name == "dbx" {
+		switch r.Protocol {
+		case "postgresql":
+			connectMap["protocol"] = "postgres"
+		case "sqlserver":
+			connectMap["protocol"] = "mssql"
+		default:
+			connectMap["protocol"] = r.Protocol
+		}
+	}
 	if appItem.IsInternal {
 		var argFormat string
 		switch r.Protocol {

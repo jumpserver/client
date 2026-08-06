@@ -1,0 +1,24 @@
+{
+  "id": "windows.dbx",
+  "name": "dbx",
+  "display_name": "DBX",
+  "version": "1.0.0",
+  "min_client_version": "4.0.0",
+  "author": "JumpServer",
+  "homepage": "https://github.com/jumpserver/clients",
+  "download_url": "https://dbxio.com/cn",
+  "category": "databases",
+  "protocols": [
+    "mariadb",
+    "mysql",
+    "oracle",
+    "postgresql",
+    "sqlserver",
+    "redis"
+  ],
+  "builtin": true,
+  "comment": {
+    "zh": "DBX 是一个开源、轻量的数据库与数据基础设施工作台。它把连接管理、对象浏览、SQL 编辑、数据修改、结构工具、专项控制台和自动化入口放在同一个工作区中，支持 70+ 种数据库及数据系统。\n\n!!!手动下载安装，点击保存启用!!!",
+    "en": "DBX is an open-source, lightweight workspace for databases and data infrastructure. It brings connection management, object browsing, SQL editing, data changes, schema tools, specialized consoles, and automation into one interface across more than 70 databases and data systems.\n\n!!!Manually download and install, click Save to activate!!!"
+  }
+}
