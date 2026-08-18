@@ -10,15 +10,23 @@ pub struct EncodedOutput {
 }
 
 pub trait H264Encoder: Send {
+    /// Submit one raw RGB frame for encoding.
+    ///
+    /// Returns the encoded outputs that became available as a result, in
+    /// submission order (0 or more). Asynchronous hardware encoders such as
+    /// VideoToolbox on Intel Macs buffer several frames internally, so a call
+    /// may return no output while an earlier frame is still in flight. Callers
+    /// must drain the tail with [`H264Encoder::finish`].
     fn encode_frame(
         &mut self,
         rgb: &[u8],
         width: usize,
         height: usize,
-    ) -> Result<EncodedOutput, String>;
+    ) -> Result<Vec<EncodedOutput>, String>;
 
-    fn flush(&mut self) -> Result<(), String> {
-        Ok(())
+    /// Flush the encoder and return every remaining buffered output, in order.
+    fn finish(&mut self) -> Result<Vec<EncodedOutput>, String> {
+        Ok(Vec::new())
     }
 
     fn sps(&self) -> &[u8];
@@ -56,7 +64,7 @@ impl H264Encoder for OpenH264Encoder {
         rgb: &[u8],
         width: usize,
         height: usize,
-    ) -> Result<EncodedOutput, String> {
+    ) -> Result<Vec<EncodedOutput>, String> {
         let rgb_slice = RgbSliceU8::new(rgb, (width, height));
         let yuv = YUVBuffer::from_rgb_source(rgb_slice);
 
@@ -67,11 +75,7 @@ impl H264Encoder for OpenH264Encoder {
         let raw = bs.to_vec();
 
         if raw.is_empty() {
-            return Ok(EncodedOutput {
-                data: Vec::new(),
-                is_keyframe: false,
-                sample_size: 0,
-            });
+            return Ok(Vec::new());
         }
 
         let nal_units = split_annex_b(&raw);
@@ -105,11 +109,11 @@ impl H264Encoder for OpenH264Encoder {
             sample_size += 4 + len;
         }
 
-        Ok(EncodedOutput {
+        Ok(vec![EncodedOutput {
             data,
             is_keyframe: is_key,
             sample_size,
-        })
+        }])
     }
 
     fn sps(&self) -> &[u8] {
@@ -250,6 +254,30 @@ pub mod vt {
                 }
             }
         }
+
+        fn take_output(&mut self, frame: EncodedFrameData) -> EncodedOutput {
+            if !frame.sps.is_empty() {
+                self.sps = frame.sps;
+            }
+            if !frame.pps.is_empty() {
+                self.pps = frame.pps;
+            }
+            let sample_size = frame.data.len() as u32;
+            EncodedOutput {
+                data: frame.data,
+                is_keyframe: frame.is_keyframe,
+                sample_size,
+            }
+        }
+
+        fn drain_ready(&mut self) -> Vec<EncodedOutput> {
+            let mut outputs = Vec::new();
+            while let Ok(frame) = self.rx.try_recv() {
+                let out = self.take_output(frame);
+                outputs.push(out);
+            }
+            outputs
+        }
     }
 
     impl H264Encoder for VideoToolboxEncoder {
@@ -258,50 +286,36 @@ pub mod vt {
             rgb: &[u8],
             width: usize,
             height: usize,
-        ) -> Result<EncodedOutput, String> {
+        ) -> Result<Vec<EncodedOutput>, String> {
             self.rgb_to_i420(rgb, width, height);
 
-            let frame_data = FrameData::I420 {
-                y: &self.i420_y,
-                u: &self.i420_u,
-                v: &self.i420_v,
-            };
-
-            let opts = EncodeOptions::default();
             let pts = self.next_pts;
             self.next_pts += 1;
 
-            self.inner
-                .encode(&frame_data, &opts, pts)
-                .map_err(|e| format!("VideoToolbox encode failed: {}", e))?;
-
-            match self.rx.recv() {
-                Ok(frame) => {
-                    if !frame.sps.is_empty() {
-                        self.sps = frame.sps;
-                    }
-                    if !frame.pps.is_empty() {
-                        self.pps = frame.pps;
-                    }
-                    let sample_size = frame.data.len() as u32;
-                    Ok(EncodedOutput {
-                        data: frame.data,
-                        is_keyframe: frame.is_keyframe,
-                        sample_size,
-                    })
-                }
-                Err(_) => Ok(EncodedOutput {
-                    data: Vec::new(),
-                    is_keyframe: false,
-                    sample_size: 0,
-                }),
+            {
+                let frame_data = FrameData::I420 {
+                    y: &self.i420_y,
+                    u: &self.i420_u,
+                    v: &self.i420_v,
+                };
+                let opts = EncodeOptions::default();
+                self.inner
+                    .encode(&frame_data, &opts, pts)
+                    .map_err(|e| format!("VideoToolbox encode failed: {}", e))?;
             }
+
+            // Collect whatever the encoder has emitted so far without blocking.
+            // On Intel Macs the hardware encoder buffers several frames, so this
+            // may be empty until the pipeline fills; the tail is drained in
+            // finish(). Blocking here would deadlock on those buffered encoders.
+            Ok(self.drain_ready())
         }
 
-        fn flush(&mut self) -> Result<(), String> {
+        fn finish(&mut self) -> Result<Vec<EncodedOutput>, String> {
             self.inner
                 .finish()
-                .map_err(|e| format!("VideoToolbox flush failed: {}", e))
+                .map_err(|e| format!("VideoToolbox flush failed: {}", e))?;
+            Ok(self.drain_ready())
         }
 
         fn sps(&self) -> &[u8] {
