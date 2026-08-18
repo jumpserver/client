@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::transcode::encoder::{create_encoder, H264Encoder};
+use crate::transcode::encoder::{create_encoder, EncodedOutput, H264Encoder};
 use crate::transcode::parser::Parser;
 use crate::transcode::renderer::Renderer;
 use crate::transcode::{bitrate_for_resolution, compute_target_dimensions, OutputResolution};
@@ -898,6 +898,31 @@ fn encode_single_chunk(
     }
 }
 
+fn append_sample(
+    nals: &mut Vec<u8>,
+    sample_sizes: &mut Vec<u32>,
+    keyframe_indices: &mut Vec<usize>,
+    sample_repeat_counts: &mut Vec<u32>,
+    submitted_repeats: &mut std::collections::VecDeque<u32>,
+    output: EncodedOutput,
+) {
+    // Each output corresponds to one submitted frame in order.
+    let repeat_count = submitted_repeats.pop_front().unwrap_or(1);
+    if output.sample_size == 0 {
+        if let Some(last) = sample_repeat_counts.last_mut() {
+            *last += repeat_count;
+        }
+        return;
+    }
+    let sample_idx = sample_sizes.len();
+    nals.extend_from_slice(&output.data);
+    sample_sizes.push(output.sample_size);
+    sample_repeat_counts.push(repeat_count);
+    if output.is_keyframe {
+        keyframe_indices.push(sample_idx);
+    }
+}
+
 fn encoder_thread_fn(
     rx: mpsc::Receiver<PreparedFrame>,
     enc_w_fixed: Option<usize>,
@@ -914,15 +939,20 @@ fn encoder_thread_fn(
     let mut sample_repeat_counts = Vec::new();
     let mut max_enc_w: u32 = 0;
     let mut max_enc_h: u32 = 0;
-    let mut has_prev_sample = false;
     let mut sps = Vec::new();
     let mut pps = Vec::new();
 
+    // Repeat counts of frames submitted to the encoder whose encoded output may
+    // arrive on a later call (VideoToolbox on Intel Macs buffers frames). Output
+    // order matches submission order (frame reordering is disabled), so each
+    // emitted sample consumes the front entry.
+    let mut submitted_repeats: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
+    // Trailing duplicate frames that extend the last emitted sample's duration.
+    let mut trailing_repeat: u32 = 0;
+
     for prepared in rx {
         if prepared.rgb.is_empty() {
-            if has_prev_sample {
-                *sample_repeat_counts.last_mut().unwrap() += prepared.repeat_count;
-            }
+            trailing_repeat += prepared.repeat_count;
             continue;
         }
 
@@ -935,34 +965,62 @@ fn encoder_thread_fn(
             )?);
         }
 
+        max_enc_w = max_enc_w.max(prepared.width as u32);
+        max_enc_h = max_enc_h.max(prepared.height as u32);
+        submitted_repeats.push_back(prepared.repeat_count);
+
         let enc = encoder.as_mut().unwrap();
-        let output = enc.encode_frame(&prepared.rgb, prepared.width, prepared.height)?;
-
-        if output.sample_size > 0 {
-            let sample_idx = sample_sizes.len();
-            nals.extend_from_slice(&output.data);
-            sample_sizes.push(output.sample_size);
-            sample_repeat_counts.push(prepared.repeat_count);
-            if output.is_keyframe {
-                keyframe_indices.push(sample_idx);
-            }
-            max_enc_w = max_enc_w.max(prepared.width as u32);
-            max_enc_h = max_enc_h.max(prepared.height as u32);
-
-            if !enc.sps().is_empty() {
-                sps = enc.sps().to_vec();
-            }
-            if !enc.pps().is_empty() {
-                pps = enc.pps().to_vec();
-            }
-            has_prev_sample = true;
-        } else if has_prev_sample {
-            *sample_repeat_counts.last_mut().unwrap() += prepared.repeat_count;
+        let outputs = enc.encode_frame(&prepared.rgb, prepared.width, prepared.height)?;
+        for output in outputs {
+            append_sample(
+                &mut nals,
+                &mut sample_sizes,
+                &mut keyframe_indices,
+                &mut sample_repeat_counts,
+                &mut submitted_repeats,
+                output,
+            );
+        }
+        if !enc.sps().is_empty() {
+            sps = enc.sps().to_vec();
+        }
+        if !enc.pps().is_empty() {
+            pps = enc.pps().to_vec();
         }
     }
 
     if let Some(ref mut enc) = encoder {
-        let _ = enc.flush();
+        let outputs = enc.finish()?;
+        for output in outputs {
+            append_sample(
+                &mut nals,
+                &mut sample_sizes,
+                &mut keyframe_indices,
+                &mut sample_repeat_counts,
+                &mut submitted_repeats,
+                output,
+            );
+        }
+        if !enc.sps().is_empty() {
+            sps = enc.sps().to_vec();
+        }
+        if !enc.pps().is_empty() {
+            pps = enc.pps().to_vec();
+        }
+    }
+
+    // Frames that never produced their own sample (e.g. a rare empty bitstream)
+    // fold into the previous sample's duration to preserve overall timing.
+    let leftover: u32 = submitted_repeats.iter().sum();
+    if leftover > 0 {
+        if let Some(last) = sample_repeat_counts.last_mut() {
+            *last += leftover;
+        }
+    }
+    if trailing_repeat > 0 {
+        if let Some(last) = sample_repeat_counts.last_mut() {
+            *last += trailing_repeat;
+        }
     }
 
     let (out_sps, out_pps) = if canonical_sps.is_empty() {
