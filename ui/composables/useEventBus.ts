@@ -27,6 +27,10 @@ type BusEvents = {
     permedAccounts: PermedAccount[]
     permedProtocols: PermedProtocol[]
   }
+  assetDetailFailed: {
+    assetId: string
+    status?: number
+  }
 } & Record<EventType, unknown>;
 
 const emitter: Emitter<BusEvents> = mitt<BusEvents>();

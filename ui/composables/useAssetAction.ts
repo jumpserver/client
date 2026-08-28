@@ -568,11 +568,33 @@ export const useAssetAction = () => {
         }
       });
 
-      // TODO 提示
-      unlistenGetAssetDetailFailed = await useTauriEventListen("get-asset-detail-failure", () => {
-        // interface eventPayload {
-        //   status: string
-        // }
+      unlistenGetAssetDetailFailed = await useTauriEventListen("get-asset-detail-failure", (event) => {
+        interface eventPayload {
+          status?: number | string
+          error?: string
+          asset_id?: string
+        }
+
+        const payload = event.payload as eventPayload;
+        const status = Number(payload.status);
+
+        toast.add({
+          title: status === 401 ? t("Login.LoginAuthenticationExpired") : t("Asset.GetAssetFailed"),
+          description: status === 401
+            ? t("Login.LoginAuthenticationExpiredDescription")
+            : t("ConnectError.ConnectFailed"),
+          color: "error",
+          icon: "line-md:close-circle",
+          progress: true,
+          duration: 4000
+        });
+
+        if (payload.asset_id) {
+          useEventBus().emit("assetDetailFailed", {
+            assetId: payload.asset_id,
+            status: Number.isFinite(status) ? status : undefined
+          });
+        }
       });
 
       unlistenRenameSuccess = await useTauriEventListen("rename-success", (event) => {

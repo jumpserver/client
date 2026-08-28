@@ -8,9 +8,11 @@ const props = defineProps<{
 }>();
 
 const { t, locale } = useI18n();
+const toast = useToast();
 const { getAssetDetail } = useAssetAction();
 const userInfoStore = useUserInfoStore();
 const { rememberAuthEnabled } = storeToRefs(userInfoStore);
+const ASSET_DETAIL_TIMEOUT_MS = 15000;
 
 const open = ref(false);
 const currentAsset = ref<AssetItem | null>(null);
@@ -168,10 +170,30 @@ async function ensureDetails(asset: AssetItem) {
 
   if (!noAccounts && !noProtocols) return asset;
 
-  const detailsReady = new Promise<AssetItem>((resolve) => {
-    const unsubscribe = useEventBus().once(
+  const bus = useEventBus();
+
+  return await new Promise<AssetItem>((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let unsubscribeUpdated: (() => void) | undefined;
+    let unsubscribeFailed: (() => void) | undefined;
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      unsubscribeUpdated?.();
+      unsubscribeFailed?.();
+    };
+
+    const finish = (next: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      next();
+    };
+
+    unsubscribeUpdated = bus.on(
       "assetDetailUpdated",
-      (payload: { assetId: string, permedAccounts: PermedAccount[], permedProtocols: PermedProtocol[] }) => {
+      (payload) => {
         if (payload.assetId !== asset.id) return;
 
         currentAsset.value = {
@@ -180,16 +202,26 @@ async function ensureDetails(asset: AssetItem) {
           permedProtocols: payload.permedProtocols || []
         } as AssetItem;
 
-        resolve(currentAsset.value!);
-      }
+        finish(() => resolve(currentAsset.value!));
+      },
+      false
     );
 
-    void unsubscribe;
-  });
+    unsubscribeFailed = bus.on(
+      "assetDetailFailed",
+      (payload) => {
+        if (payload.assetId !== asset.id) return;
+        finish(() => reject(new Error("get asset detail failed")));
+      },
+      false
+    );
 
-  await getAssetDetail(asset.id);
-  const updated = await detailsReady;
-  return updated;
+    timer = setTimeout(() => {
+      finish(() => reject(new Error("get asset detail timeout")));
+    }, ASSET_DETAIL_TIMEOUT_MS);
+
+    getAssetDetail(asset.id);
+  });
 }
 
 /**
@@ -199,7 +231,26 @@ async function ensureDetails(asset: AssetItem) {
 async function openModal(asset: AssetItem, preferredProtocol?: string): Promise<any> {
   connectMethodValid.value = false;
   currentAsset.value = asset;
-  await ensureDetails(asset);
+
+  try {
+    await ensureDetails(asset);
+  } catch (error) {
+    const timedOut = error instanceof Error && error.message.includes("timeout");
+
+    if (timedOut) {
+      toast.add({
+        title: t("Asset.GetAssetFailed"),
+        description: t("ConnectError.ConnectFailed"),
+        color: "error",
+        icon: "line-md:close-circle",
+        progress: true,
+        duration: 4000
+      });
+    }
+
+    throw error;
+  }
+
   initDraft(currentAsset.value!, preferredProtocol);
   open.value = true;
 

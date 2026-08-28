@@ -216,6 +216,7 @@ test("connection editor blocks confirmation until the form is valid and resets v
   const editor = load("ui/components/ConnectionEditor/connectionEditor.vue", {
     defineProps: () => ({}),
     defineExpose() {},
+    useToast: () => ({ add: () => assert.fail("Unexpected toast for an asset with complete details") }),
     useAssetAction: () => ({ getAssetDetail() {} }),
     useI18n: () => ({ t: (key) => key, locale: vue.ref("en") }),
     sortPermedProtocols: (protocols) => protocols

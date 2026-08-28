@@ -123,9 +123,17 @@ pub async fn get_asset_detail(
     let (_, asset_service) = match load_asset_service(&app, &session).await {
         Ok(result) => result,
         Err(error) => {
+            error!(
+                "get asset detail failed: asset_id={}, error={}",
+                asset_id, error
+            );
             let _ = app.emit(
                 "get-asset-detail-failure",
-                json!({ "status": session_error_status(&error), "error": error }),
+                json!({
+                    "status": session_error_status(&error),
+                    "error": error,
+                    "asset_id": asset_id
+                }),
             );
             return Ok(());
         }
@@ -134,9 +142,17 @@ pub async fn get_asset_detail(
     let asset_detail = asset_service.get_asset_detail(&asset_id).await;
 
     if !asset_detail.success {
+        error!(
+            "get asset detail failed: asset_id={}, status={}",
+            asset_id, asset_detail.status
+        );
         let _ = app.emit(
             "get-asset-detail-failure",
-            json!({ "status": asset_detail.status }),
+            json!({
+                "status": asset_detail.status,
+                "error": asset_detail.data,
+                "asset_id": asset_id
+            }),
         );
         return Ok(());
     }
