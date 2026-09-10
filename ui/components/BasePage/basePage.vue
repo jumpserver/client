@@ -49,7 +49,7 @@ const {
 const assetManager = useAssetFetcher(props.type, scrollRef);
 const connEditorRef = ref<InstanceType<typeof ConnectionEditor> | null>(null);
 
-const { loggedIn } = storeToRefs(userInfoStore);
+const { loggedIn, rememberAuthEnabled } = storeToRefs(userInfoStore);
 const { refreshAssets, assetsData, isAppending, scrollbarStyles, isInitialLoading, appendSkeletonCount } = assetManager;
 
 const { visibleAssets } = useDisplayAssets(
@@ -142,10 +142,10 @@ const handleConnectAsset = async (asset: AssetItem, preferredProtocol?: string) 
 
     const mode = saved.accountMode || "hosted";
     if (mode === "manual") {
-      return !!(saved.rememberSecret && saved.manualUsername && saved.manualPassword);
+      return !!(rememberAuthEnabled.value && saved.rememberSecret && saved.manualUsername && saved.manualPassword);
     }
     if (mode === "dynamic") {
-      return !!(saved.rememberSecret && saved.dynamicPassword);
+      return !!(rememberAuthEnabled.value && saved.rememberSecret && saved.dynamicPassword);
     }
 
     return true;

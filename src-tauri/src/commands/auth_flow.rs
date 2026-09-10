@@ -88,18 +88,27 @@ pub async fn auth_login(
             anyhow::bail!("Unable to validate the user profile");
         }
 
-        let license_valid = if xpack_message.status == 200 && xpack_message.success {
-            serde_json::from_str::<Value>(&xpack_message.data)
-                .ok()
-                .and_then(|value| {
-                    value
-                        .get("XPACK_LICENSE_IS_VALID")
-                        .and_then(|v| v.as_bool())
-                })
-                .unwrap_or(false)
+        let public_settings = if xpack_message.status == 200 && xpack_message.success {
+            serde_json::from_str::<Value>(&xpack_message.data).ok()
         } else {
-            false
+            None
         };
+        let license_valid = public_settings
+            .as_ref()
+            .and_then(|value| {
+                value
+                    .get("XPACK_LICENSE_IS_VALID")
+                    .and_then(|v| v.as_bool())
+            })
+            .unwrap_or(false);
+        let security_luna_remember_auth = public_settings
+            .as_ref()
+            .and_then(|value| {
+                value
+                    .get("SECURITY_LUNA_REMEMBER_AUTH")
+                    .and_then(|v| v.as_bool())
+            })
+            .unwrap_or(true);
 
         let _ = app.emit(
             "login-success-detected",
@@ -110,6 +119,7 @@ pub async fn auth_login(
                 "resolved_site": site,
                 "current_org": current_org,
                 "xpack_license_valid": license_valid,
+                "security_luna_remember_auth": security_luna_remember_auth,
                 "permission_orgs": permission_orgs,
                 "client_login_session": crate::service::client_session::session_info(&site).await?,
             }),

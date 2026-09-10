@@ -219,7 +219,9 @@ test("connection editor blocks confirmation until the form is valid and resets v
     useAssetAction: () => ({ getAssetDetail() {} }),
     useI18n: () => ({ t: (key) => key, locale: vue.ref("en") }),
     sortPermedProtocols: (protocols) => protocols
-  }, {}, ["openModal", "onConfirm", "onCancel", "connectMethodValid", "open"]);
+  }, {
+    "~/store/modules/userInfo": { useUserInfoStore: () => vue.reactive({ rememberAuthEnabled: true }) }
+  }, ["openModal", "onConfirm", "onCancel", "connectMethodValid", "open"]);
   const asset = { id: "asset", permedProtocols: [{ name: "mariadb" }], permedAccounts: [{ alias: "root", name: "root" }] };
   const first = editor.openModal(asset);
   await flush();
