@@ -1,13 +1,18 @@
 <script setup lang="ts">
 import type { AssetItem, AssetPageType, ConnectionInfo, PermedAccount, PermedProtocol } from "~/types/index";
 import EditForm from "~/components/EditForm/editForm.vue";
+import { useUserInfoStore } from "~/store/modules/userInfo";
 
 const props = defineProps<{
   assetType?: AssetPageType
 }>();
 
 const { t, locale } = useI18n();
+const toast = useToast();
 const { getAssetDetail } = useAssetAction();
+const userInfoStore = useUserInfoStore();
+const { rememberAuthEnabled } = storeToRefs(userInfoStore);
+const ASSET_DETAIL_TIMEOUT_MS = 15000;
 
 const open = ref(false);
 const currentAsset = ref<AssetItem | null>(null);
@@ -67,9 +72,9 @@ const initDraft = (asset: AssetItem, preferredProtocol?: string) => {
   }
 
   draftManualUsername.value = saved?.manualUsername || "";
-  draftManualPassword.value = saved?.manualPassword || "";
-  draftDynamicPassword.value = saved?.dynamicPassword || "";
-  draftRememberSecret.value = saved?.rememberSecret || false;
+  draftManualPassword.value = rememberAuthEnabled.value ? saved?.manualPassword || "" : "";
+  draftDynamicPassword.value = rememberAuthEnabled.value ? saved?.dynamicPassword || "" : "";
+  draftRememberSecret.value = rememberAuthEnabled.value && !!saved?.rememberSecret;
   draftConnectMethod.value
     = !preferredProtocol || preferredProtocol === saved?.protocol ? saved?.connectMethod || "" : "";
 };
@@ -121,7 +126,7 @@ const buildConnectionInfo = () => {
     manualUsername: draftManualUsername.value || "",
     manualPassword: draftManualPassword.value || "",
     dynamicPassword: draftDynamicPassword.value || "",
-    rememberSecret: !!draftRememberSecret.value,
+    rememberSecret: rememberAuthEnabled.value && !!draftRememberSecret.value,
     connectMethod: draftConnectMethod.value || "",
     availableProtocols: normalizeProtocols()
   };
@@ -163,10 +168,30 @@ async function ensureDetails(asset: AssetItem) {
 
   if (!noAccounts && !noProtocols) return asset;
 
-  const detailsReady = new Promise<AssetItem>((resolve) => {
-    const unsubscribe = useEventBus().once(
+  const bus = useEventBus();
+
+  return await new Promise<AssetItem>((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let unsubscribeUpdated: (() => void) | undefined;
+    let unsubscribeFailed: (() => void) | undefined;
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      unsubscribeUpdated?.();
+      unsubscribeFailed?.();
+    };
+
+    const finish = (next: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      next();
+    };
+
+    unsubscribeUpdated = bus.on(
       "assetDetailUpdated",
-      (payload: { assetId: string, permedAccounts: PermedAccount[], permedProtocols: PermedProtocol[] }) => {
+      (payload) => {
         if (payload.assetId !== asset.id) return;
 
         currentAsset.value = {
@@ -175,16 +200,26 @@ async function ensureDetails(asset: AssetItem) {
           permedProtocols: payload.permedProtocols || []
         } as AssetItem;
 
-        resolve(currentAsset.value!);
-      }
+        finish(() => resolve(currentAsset.value!));
+      },
+      false
     );
 
-    void unsubscribe;
-  });
+    unsubscribeFailed = bus.on(
+      "assetDetailFailed",
+      (payload) => {
+        if (payload.assetId !== asset.id) return;
+        finish(() => reject(new Error("get asset detail failed")));
+      },
+      false
+    );
 
-  await getAssetDetail(asset.id);
-  const updated = await detailsReady;
-  return updated;
+    timer = setTimeout(() => {
+      finish(() => reject(new Error("get asset detail timeout")));
+    }, ASSET_DETAIL_TIMEOUT_MS);
+
+    getAssetDetail(asset.id);
+  });
 }
 
 /**
@@ -193,7 +228,26 @@ async function ensureDetails(asset: AssetItem) {
  */
 async function openModal(asset: AssetItem, preferredProtocol?: string): Promise<any> {
   currentAsset.value = asset;
-  await ensureDetails(asset);
+
+  try {
+    await ensureDetails(asset);
+  } catch (error) {
+    const timedOut = error instanceof Error && error.message.includes("timeout");
+
+    if (timedOut) {
+      toast.add({
+        title: t("Asset.GetAssetFailed"),
+        description: t("ConnectError.ConnectFailed"),
+        color: "error",
+        icon: "line-md:close-circle",
+        progress: true,
+        duration: 4000
+      });
+    }
+
+    throw error;
+  }
+
   initDraft(currentAsset.value!, preferredProtocol);
   open.value = true;
 
@@ -223,6 +277,7 @@ defineExpose({ open: openModal, close });
       v-model:dynamic-password="draftDynamicPassword"
       v-model:remember-secret="draftRememberSecret"
       v-model:connect-method="draftConnectMethod"
+      :remember-secret-enabled="rememberAuthEnabled"
       :accounts="currentAsset.permedAccounts || []"
       :protocols="currentAsset.permedProtocols || []"
       :asset-type="props.assetType"
