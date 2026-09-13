@@ -7,6 +7,12 @@ export type SiteUserData = UserData & {
   connectionInfoMap?: Record<string, ConnectionInfo>
 };
 
+interface RemoteSettingsSyncState {
+  bearerToken: string
+  requestState: "idle" | "pending" | "resolved"
+  rememberAuthResolved: boolean
+}
+
 // 其实应该叫做 accountInfoStore 比较好
 export const useUserInfoStore = defineStore(
   "userInfo",
@@ -20,8 +26,19 @@ export const useUserInfoStore = defineStore(
     const userMap = ref<Record<string, SiteUserData>>({});
     const currentRdpClientOption = ref<RdpGraphics>({});
     const currentConnectionInfoMap = ref<Record<string, ConnectionInfo>>({});
+    const remoteSettingsSyncState = ref<Record<string, RemoteSettingsSyncState>>({});
 
     const hasUser = computed(() => Object.keys(userMap.value).length > 0);
+    const rememberAuthResolved = computed(() => {
+      const user = currentUser.value;
+      if (!user) return false;
+
+      const state = remoteSettingsSyncState.value[user.site];
+      return state?.bearerToken === user.bearerToken && state.rememberAuthResolved;
+    });
+    const rememberAuthEnabled = computed(
+      () => rememberAuthResolved.value && currentUser.value?.securityLunaRememberAuth !== false
+    );
 
     /**
      * @description 设置用户登录状态
@@ -29,6 +46,65 @@ export const useUserInfoStore = defineStore(
      */
     const setUserLoggedIn = (l: boolean) => {
       loggedIn.value = l;
+      if (!l) {
+        remoteSettingsSyncState.value = {};
+      }
+    };
+
+    /**
+     * @description 同一站点和会话只同步一次远端设置
+     * @param site
+     * @param bearerToken
+     */
+    const beginRemoteSettingsSync = (site: string, bearerToken: string) => {
+      const existing = remoteSettingsSyncState.value[site];
+      if (
+        existing?.bearerToken === bearerToken
+        && (existing.requestState === "pending" || existing.requestState === "resolved")
+      ) {
+        return false;
+      }
+
+      remoteSettingsSyncState.value[site] = {
+        bearerToken,
+        requestState: "pending",
+        rememberAuthResolved: existing?.bearerToken === bearerToken && existing.rememberAuthResolved
+      };
+      return true;
+    };
+
+    /**
+     * @description 完成远端设置同步并更新指定站点是否允许记住认证信息
+     * @param site
+     * @param bearerToken
+     * @param enabled
+     * @param retryUserSettings
+     */
+    const completeRemoteSettingsSync = (
+      site: string,
+      bearerToken: string,
+      enabled: boolean,
+      retryUserSettings = false
+    ) => {
+      const siteData = userMap.value[site];
+      if (!siteData || siteData.bearerToken !== bearerToken) return false;
+
+      const next = {
+        ...siteData,
+        securityLunaRememberAuth: enabled
+      } as SiteUserData;
+
+      userMap.value[site] = next;
+      if (currentSite.value === site) {
+        currentUser.value = next;
+      }
+
+      remoteSettingsSyncState.value[site] = {
+        bearerToken,
+        requestState: retryUserSettings ? "idle" : "resolved",
+        rememberAuthResolved: true
+      };
+      return true;
     };
 
     /**
@@ -54,6 +130,14 @@ export const useUserInfoStore = defineStore(
       userMap.value[site] = next;
       currentUser.value = next;
       currentSite.value = site;
+
+      if (typeof next.securityLunaRememberAuth === "boolean") {
+        remoteSettingsSyncState.value[site] = {
+          bearerToken: next.bearerToken,
+          requestState: "idle",
+          rememberAuthResolved: true
+        };
+      }
 
       // 设置组织 ID
       if (userData.org?.id) {
@@ -85,6 +169,8 @@ export const useUserInfoStore = defineStore(
         name: "main",
         site
       });
+
+      delete remoteSettingsSyncState.value[site];
 
       if (!(site in userMap.value)) {
         return;
@@ -127,6 +213,7 @@ export const useUserInfoStore = defineStore(
         currentRdpClientOption.value = {};
         currentConnectionInfoMap.value = {};
         currentOrganizations.value = [];
+        remoteSettingsSyncState.value = {};
 
         nextTick(() => {
           useEventBus().emit("clearAssets", undefined);
@@ -277,6 +364,8 @@ export const useUserInfoStore = defineStore(
 
     return {
       orgId,
+      rememberAuthResolved,
+      rememberAuthEnabled,
       userMap,
       loggedIn,
       currentSite,
@@ -287,6 +376,8 @@ export const useUserInfoStore = defineStore(
 
       setUserData,
       getUserData,
+      beginRemoteSettingsSync,
+      completeRemoteSettingsSync,
       setCurrentOrg,
       setCurrentSite,
       deleteUserData,

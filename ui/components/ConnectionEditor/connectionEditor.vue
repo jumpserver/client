@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import type { AssetItem, ConnectionInfo, PermedAccount, PermedProtocol } from "~/types/index";
 import EditForm from "~/components/EditForm/editForm.vue";
+import { useUserInfoStore } from "~/store/modules/userInfo";
 
 const { t, locale } = useI18n();
 const { getAssetDetail } = useAssetAction();
+const userInfoStore = useUserInfoStore();
+const { rememberAuthEnabled } = storeToRefs(userInfoStore);
 
 const open = ref(false);
 const currentAsset = ref<AssetItem | null>(null);
@@ -28,14 +31,16 @@ const modalTitle = computed(() => {
  * @description 初始化 Form
  * @param asset
  */
-const initDraft = (asset: AssetItem) => {
+const initDraft = (asset: AssetItem, preferredProtocol?: string) => {
   const saved: ConnectionInfo | undefined = asset.savedConnection;
 
   const protocols = asset.permedProtocols || ([] as PermedProtocol[]);
   const accounts = asset.permedAccounts || ([] as PermedAccount[]);
 
   // 协议默认：保存的协议 -> 第一个协议 -> 空
-  draftProtocol.value = saved?.protocol || protocols[0]?.name || "";
+  draftProtocol.value = protocols.some((protocol) => protocol.name === preferredProtocol)
+    ? preferredProtocol!
+    : saved?.protocol || protocols[0]?.name || "";
 
   // 账号默认：保存的用户名 -> 第一条托管账号 -> 动态账号(@USER) -> 手动输入(@INPUT) -> 空
   if (saved?.username) {
@@ -61,10 +66,11 @@ const initDraft = (asset: AssetItem) => {
   }
 
   draftManualUsername.value = saved?.manualUsername || "";
-  draftManualPassword.value = saved?.manualPassword || "";
-  draftDynamicPassword.value = saved?.dynamicPassword || "";
-  draftRememberSecret.value = saved?.rememberSecret || false;
-  draftConnectMethod.value = saved?.connectMethod || "";
+  draftManualPassword.value = rememberAuthEnabled.value ? saved?.manualPassword || "" : "";
+  draftDynamicPassword.value = rememberAuthEnabled.value ? saved?.dynamicPassword || "" : "";
+  draftRememberSecret.value = rememberAuthEnabled.value && !!saved?.rememberSecret;
+  draftConnectMethod.value
+    = !preferredProtocol || preferredProtocol === saved?.protocol ? saved?.connectMethod || "" : "";
 };
 
 /**
@@ -110,7 +116,7 @@ const buildConnectionInfo = () => {
     manualUsername: draftManualUsername.value || "",
     manualPassword: draftManualPassword.value || "",
     dynamicPassword: draftDynamicPassword.value || "",
-    rememberSecret: !!draftRememberSecret.value,
+    rememberSecret: rememberAuthEnabled.value && !!draftRememberSecret.value,
     connectMethod: draftConnectMethod.value || "",
     availableProtocols: normalizeProtocols()
   };
@@ -180,10 +186,10 @@ async function ensureDetails(asset: AssetItem) {
  * @description 打开 Modal
  * @param asset
  */
-async function openModal(asset: AssetItem): Promise<any> {
+async function openModal(asset: AssetItem, preferredProtocol?: string): Promise<any> {
   currentAsset.value = asset;
   await ensureDetails(asset);
-  initDraft(currentAsset.value!);
+  initDraft(currentAsset.value!, preferredProtocol);
   open.value = true;
 
   return new Promise((resolve, reject) => {
@@ -212,6 +218,7 @@ defineExpose({ open: openModal, close });
       v-model:dynamic-password="draftDynamicPassword"
       v-model:remember-secret="draftRememberSecret"
       v-model:connect-method="draftConnectMethod"
+      :remember-secret-enabled="rememberAuthEnabled"
       :accounts="currentAsset.permedAccounts || []"
       :protocols="currentAsset.permedProtocols || []"
     />

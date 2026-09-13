@@ -1,4 +1,20 @@
 use crate::commands::requests::{get_with_response, ApiResponse};
+use serde_json::Value;
+
+pub fn parse_remember_auth_enabled(response: &ApiResponse) -> bool {
+    if response.status != 200 || !response.success {
+        return true;
+    }
+
+    serde_json::from_str::<Value>(&response.data)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("SECURITY_LUNA_REMEMBER_AUTH")
+                .and_then(Value::as_bool)
+        })
+        .unwrap_or(true)
+}
 
 #[derive(Clone)]
 pub struct UserService {

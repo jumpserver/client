@@ -22,7 +22,7 @@ const emits = defineEmits<{
   (e: "editTrigger", asset: AssetItem): void
   (e: "connectAsset", asset: AssetItem): void
   (e: "contextTrigger", asset: AssetItem): void
-  (e: "connectTrigger", asset: AssetItem): void
+  (e: "connectTrigger", asset: AssetItem, protocol?: string): void
 }>();
 
 const ASSET_NAME_TOOLTIP_THRESHOLD = 20;
@@ -39,8 +39,7 @@ const {
   displayProtocol,
   handleAssetRename,
   handleAssetFavorite,
-  handleAssetUnfavorite,
-  handleAssetConnection
+  handleAssetUnfavorite
 } = useAssetAction();
 const userInfoStore = useUserInfoStore();
 const { currentConnectionInfoMap } = storeToRefs(userInfoStore);
@@ -104,14 +103,7 @@ const buildMenuItems = computed(() => {
       const protocolItems: MenuItem[] = uniqueProtocols.map((name: string) => ({
         label: `${t("ContextMenu.Use")} ${name.toUpperCase()}`,
         icon: "i-lucide-plug",
-        onClick: () =>
-          handleAssetConnection(
-            displayUser(asset.id, asset.permedAccounts!),
-            asset.id,
-            displayProtocol(asset.id, asset.permedProtocols!),
-            asset.permedAccounts!,
-            name
-          )
+        onClick: () => emits("connectTrigger", asset, name)
       }));
 
       const moreConnect: MenuItem = {
@@ -144,6 +136,10 @@ function handleUnfavorite(asset: AssetItem) {
  */
 function handleContextTrigger(asset: AssetItem) {
   emits("contextTrigger", asset);
+}
+
+function handleConnectTrigger(asset: AssetItem, protocol?: string) {
+  emits("connectTrigger", asset, protocol);
 }
 
 function emitFavoriteChanged(assetId: string, favorite: boolean) {
@@ -389,7 +385,7 @@ const columns: TableColumn<AssetItem>[] = [
     @update:visible="contextMenuVisible = $event"
     @context-trigger="handleContextTrigger"
     @edit-trigger="emits('editTrigger', contextMenuAsset as AssetItem)"
-    @connect-trigger="emits('connectTrigger', contextMenuAsset as AssetItem)"
+    @connect-trigger="handleConnectTrigger"
     @rename-trigger="handleRenameTrigger"
   />
 </template>

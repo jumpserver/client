@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { AssetItem, AssetPageType, CharsetType, LayoutsType, ResolutionType, SettingResponse } from "~/types/index";
 
 import SkeletonCard from "~/components/Card/GridCard/skeletonCard.vue";
@@ -14,13 +13,18 @@ const props = defineProps<{
   platform?: string
 }>();
 
+interface GetSettingResult {
+  rememberAuthEnabled: boolean
+  settingSuccess: boolean
+  settingData?: string | null
+}
+
 const providerClearSelection = inject<(cb: () => void) => void>("providerClearSelection");
 
 const scrollRef = ref<HTMLElement | null>(null);
-const subscribeSettingEvent = ref<UnlistenFn | null>(null);
 
 const { t } = useI18n();
-const { confirmConnection, saveConnectionInfo } = useAssetConnection();
+const { connectAsset, confirmConnection, saveConnectionInfo } = useAssetConnection();
 
 const contextMenu = useContextMenu();
 const userInfoStore = useUserInfoStore();
@@ -49,7 +53,7 @@ const {
 const assetManager = useAssetFetcher(props.type, scrollRef);
 const connEditorRef = ref<InstanceType<typeof ConnectionEditor> | null>(null);
 
-const { loggedIn, currentSite, currentUser } = storeToRefs(userInfoStore);
+const { loggedIn, currentSite, rememberAuthEnabled } = storeToRefs(userInfoStore);
 const { refreshAssets, assetsData, isAppending, scrollbarStyles, isInitialLoading, appendSkeletonCount } = assetManager;
 
 const { visibleAssets } = useDisplayAssets(
@@ -83,9 +87,18 @@ watch(
   () => loggedIn.value,
   async (nv: boolean) => {
     if (nv) {
-      getSettings();
+      void getSettings();
       await nextTick();
       refreshAssets();
+    }
+  }
+);
+
+watch(
+  () => currentSite.value,
+  () => {
+    if (loggedIn.value) {
+      void getSettings();
     }
   }
 );
@@ -103,10 +116,56 @@ watch(
  * 获取 Setting 信息
  */
 async function getSettings() {
-  await useTauriCoreInvoke("get_setting", {
-    site: currentSite.value,
-    bearerToken: currentUser.value!.bearerToken
-  });
+  const site = currentSite.value;
+  const bearerToken = userInfoStore.getUserData(site)?.bearerToken;
+
+  if (!site || !bearerToken) return;
+  if (!userInfoStore.beginRemoteSettingsSync(site, bearerToken)) return;
+
+  let result: GetSettingResult;
+  try {
+    result = await useTauriCoreInvoke<GetSettingResult>("get_setting", {
+      site,
+      bearerToken
+    });
+  } catch {
+    userInfoStore.completeRemoteSettingsSync(site, bearerToken, true);
+    return;
+  }
+
+  const isCurrentSession
+    = currentSite.value === site && userInfoStore.getUserData(site)?.bearerToken === bearerToken;
+  const retryUserSettings = !isCurrentSession && result.settingSuccess && !!result.settingData;
+  const completed = userInfoStore.completeRemoteSettingsSync(
+    site,
+    bearerToken,
+    result.rememberAuthEnabled !== false,
+    retryUserSettings
+  );
+  if (!completed) return;
+  if (!isCurrentSession) return;
+
+  if (!result.settingSuccess || !result.settingData) return;
+
+  try {
+    applyUserSetting(JSON.parse(result.settingData) as SettingResponse);
+  } catch (error) {
+    console.error("parse remote setting failed", error);
+  }
+}
+
+function applyUserSetting(settingConfig: SettingResponse) {
+  userInfoStore.setRdpClientOption(settingConfig.graphics);
+
+  if (!isUsingLocalDefaults()) return;
+
+  setCharsetPreference((settingConfig.command_line?.charset as CharsetType) || "default");
+  setBackspacePreference(!!settingConfig.command_line?.is_backspace_as_ctrl_h);
+  setRdpResolutionPreference((settingConfig.graphics?.rdp_resolution as ResolutionType) || "auto");
+  setKeyboardLayoutPreference(settingConfig.graphics?.keyboard_layout || "en-us-qwerty");
+  setRdpClientOptionPreference(settingConfig.graphics?.rdp_client_option || []);
+  setRdpColorQualityPreference(settingConfig.graphics?.rdp_color_quality || "32");
+  setRdpSmartSizePreference(settingConfig.graphics?.rdp_smart_size || "0");
 }
 
 /**
@@ -137,26 +196,31 @@ const handleEditTrigger = async (asset: AssetItem) => {
 /**
  * @description 处理资产连接
  */
-const handleConnectAsset = async (asset: AssetItem) => {
+const handleConnectAsset = async (asset: AssetItem, preferredProtocol?: string) => {
   const saved = asset.savedConnection;
+  const hostedAccount = asset.permedAccounts?.find((account) => account.alias && !account.alias.startsWith("@"));
 
   const canDirectConnect = (() => {
     if (!saved || !saved.protocol || !saved.username) return false;
 
     const mode = saved.accountMode || "hosted";
     if (mode === "manual") {
-      return !!(saved.rememberSecret && saved.manualUsername && saved.manualPassword);
+      return !!(rememberAuthEnabled.value && saved.rememberSecret && saved.manualUsername && saved.manualPassword);
     }
     if (mode === "dynamic") {
-      return !!(saved.rememberSecret && saved.dynamicPassword);
+      return !!(rememberAuthEnabled.value && saved.rememberSecret && saved.dynamicPassword);
     }
 
     return true;
   })();
 
+  if (preferredProtocol && (canDirectConnect || (!saved && hostedAccount))) {
+    return connectAsset(asset, preferredProtocol);
+  }
+
   if (canDirectConnect) {
     return confirmConnection(asset, {
-      protocol: saved!.protocol,
+      protocol: preferredProtocol || saved!.protocol,
       account: saved!.username,
       accountId: (saved as any).accountId,
       accountMode: (saved!.accountMode as any) || "hosted",
@@ -164,13 +228,13 @@ const handleConnectAsset = async (asset: AssetItem) => {
       manualPassword: saved!.manualPassword || "",
       dynamicPassword: saved!.dynamicPassword || "",
       rememberSecret: !!saved!.rememberSecret,
-      connectMethod: saved!.connectMethod || "",
+      connectMethod: !preferredProtocol || preferredProtocol === saved!.protocol ? saved!.connectMethod || "" : "",
       availableProtocols: saved!.availableProtocols || []
     });
   }
 
   try {
-    const info = await connEditorRef.value!.open(asset);
+    const info = await connEditorRef.value!.open(asset, preferredProtocol);
     confirmConnection(asset, info);
   } catch (e) {
     console.error(e);
@@ -180,51 +244,17 @@ const handleConnectAsset = async (asset: AssetItem) => {
 /**
  * @description 右键菜单的连接操作
  */
-const handleConnectTrigger = (asset: AssetItem) => {
-  handleConnectAsset(asset);
-};
-
-/**
- * @description 监听 Tauri 事件
- */
-const listenTauriEvent = async () => {
-  interface eventPayloadType {
-    data: string
-    status: number
-  }
-
-  subscribeSettingEvent.value = await useTauriEventListen("get-setting-success", (event) => {
-    const payload = event.payload as eventPayloadType;
-    const settingConfig = JSON.parse(payload.data) as SettingResponse;
-
-    userInfoStore.setRdpClientOption(settingConfig.graphics);
-
-    if (!isUsingLocalDefaults()) return;
-
-    setCharsetPreference((settingConfig.command_line?.charset as CharsetType) || "default");
-    setBackspacePreference(!!settingConfig.command_line?.is_backspace_as_ctrl_h);
-    setRdpResolutionPreference((settingConfig.graphics?.rdp_resolution as ResolutionType) || "auto");
-    setKeyboardLayoutPreference(settingConfig.graphics?.keyboard_layout || "en-us-qwerty");
-    setRdpClientOptionPreference(settingConfig.graphics?.rdp_client_option || []);
-    setRdpColorQualityPreference(settingConfig.graphics?.rdp_color_quality || "32");
-    setRdpSmartSizePreference(settingConfig.graphics?.rdp_smart_size || "0");
-  });
+const handleConnectTrigger = (asset: AssetItem, preferredProtocol?: string) => {
+  handleConnectAsset(asset, preferredProtocol);
 };
 
 onMounted(async () => {
-  await listenTauriEvent();
   providerClearSelection?.(assetManagement.clearSelectedCard);
 
   if (loggedIn.value) {
-    getSettings();
+    void getSettings();
     await nextTick();
     refreshAssets();
-  }
-});
-
-onBeforeUnmount(() => {
-  if (subscribeSettingEvent.value) {
-    subscribeSettingEvent.value();
   }
 });
 </script>

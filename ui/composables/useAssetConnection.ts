@@ -18,6 +18,7 @@ interface ConnectionFormInfo {
 export function useAssetConnection() {
   const { handleAssetConnection, displayUser } = useAssetAction();
   const userInfoStore = useUserInfoStore();
+  const { rememberAuthEnabled } = storeToRefs(userInfoStore);
 
   /**
    * 处理资产连接
@@ -29,14 +30,7 @@ export function useAssetConnection() {
         displayUser(asset.id, asset.permedAccounts!),
         asset.id,
         protocol,
-        asset.permedAccounts!,
-        undefined,
-        {
-          accountMode: "hosted",
-          manualUsername: "",
-          manualPassword: "",
-          dynamicPassword: ""
-        }
+        asset.permedAccounts!
       );
     } else {
       // 否则需要打开编辑模态框
@@ -77,12 +71,16 @@ export function useAssetConnection() {
       username: connectionInfo.account,
       accountId: resolvedAccountId,
       accountMode: connectionInfo.accountMode,
-      manualUsername: connectionInfo.rememberSecret ? connectionInfo.manualUsername : "",
-      manualPassword: connectionInfo.rememberSecret ? connectionInfo.manualPassword : "",
-      dynamicPassword: connectionInfo.rememberSecret ? connectionInfo.dynamicPassword : "",
-      rememberSecret: connectionInfo.rememberSecret,
       connectMethod: connectionInfo.connectMethod,
-      availableProtocols
+      availableProtocols,
+      ...(rememberAuthEnabled.value
+        ? {
+          manualUsername: connectionInfo.rememberSecret ? connectionInfo.manualUsername : "",
+          manualPassword: connectionInfo.rememberSecret ? connectionInfo.manualPassword : "",
+          dynamicPassword: connectionInfo.rememberSecret ? connectionInfo.dynamicPassword : "",
+          rememberSecret: connectionInfo.rememberSecret
+        }
+        : {})
     };
 
     userInfoStore.setConnectionInfoForAsset(asset.id, payload);

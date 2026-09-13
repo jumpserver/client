@@ -10,7 +10,7 @@ use tokio::sync::oneshot;
 use url::Url;
 
 use crate::service::token_oauth::TokenService;
-use crate::service::user::UserService;
+use crate::service::user::{parse_remember_auth_enabled, UserService};
 
 /// 记录一次登录发起时的上下文（PKCE/CSRF 和回调通道）。
 pub struct PendingAuth {
@@ -266,6 +266,7 @@ pub async fn auth_login(
         } else {
             false
         };
+        let remember_auth_enabled = parse_remember_auth_enabled(&xpack_message);
 
         let _ = app.emit(
             "login-success-detected",
@@ -276,6 +277,7 @@ pub async fn auth_login(
                 "resolved_site": site,
                 "current_org": current_org,
                 "xpack_license_valid": license_valid,
+                "security_luna_remember_auth": remember_auth_enabled,
                 "permission_orgs": permission_orgs,
             }),
         );

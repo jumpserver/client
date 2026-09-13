@@ -12,8 +12,12 @@ const emits = defineEmits<{
   (e: "connectAsset", asset: AssetItem): void
   (e: "contextTrigger", asset: AssetItem): void
   (e: "editTrigger", asset: AssetItem): void
-  (e: "connectTrigger", asset: AssetItem): void
+  (e: "connectTrigger", asset: AssetItem, protocol?: string): void
 }>();
+
+const handleConnectTrigger = (asset: AssetItem, protocol?: string) => {
+  emits("connectTrigger", asset, protocol);
+};
 </script>
 
 <template>
@@ -25,7 +29,7 @@ const emits = defineEmits<{
       @connect-asset="emits('connectAsset', item)"
       @context-trigger="emits('contextTrigger', $event)"
       @edit-trigger="emits('editTrigger', item)"
-      @connect-trigger="emits('connectTrigger', item)"
+      @connect-trigger="handleConnectTrigger"
     />
   </div>
 </template>

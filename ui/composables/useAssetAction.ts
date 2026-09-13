@@ -57,7 +57,8 @@ export const useAssetAction = () => {
   const userInfoStore = useUserInfoStore();
   const settingManager = useSettingManager();
   // prettier-ignore
-  const { currentSite, currentUser, currentConnectionInfoMap, currentRdpClientOption, orgId } = storeToRefs(userInfoStore);
+  const { currentSite, currentUser, currentConnectionInfoMap, currentRdpClientOption, orgId, rememberAuthEnabled }
+    = storeToRefs(userInfoStore);
   const { charset, rdpResolution, backspaceAsCtrlH, keyboardLayout, rdpClientOption, rdpColorQuality, rdpSmartSize }
     = settingManager;
 
@@ -289,11 +290,13 @@ export const useAssetAction = () => {
     if (effectiveMode === "manual" || selected === "手动输入" || selected === "Manual input") {
       // prettier-ignore
       input_username = ephemeral?.manualUsername ?? saved?.manualUsername ?? matchedAccount?.username ?? "";
-      input_secret = ephemeral?.manualPassword ?? saved?.manualPassword ?? "";
+      input_secret
+        = ephemeral?.manualPassword ?? (rememberAuthEnabled.value ? saved?.manualPassword : undefined) ?? "";
     } else if (effectiveMode === "dynamic" || selected?.includes("同名账号") || selected?.includes("Dynamic user")) {
       // 同名账号仅需传递密码
       input_username = "";
-      input_secret = ephemeral?.dynamicPassword ?? saved?.dynamicPassword ?? "";
+      input_secret
+        = ephemeral?.dynamicPassword ?? (rememberAuthEnabled.value ? saved?.dynamicPassword : undefined) ?? "";
     } else {
       // 托管账号：account 用 ID，input_username 用展示账号名
       input_username = selected || matchedAccount?.username || "";

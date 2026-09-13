@@ -12,6 +12,7 @@ const props = defineProps<{
   manualPassword?: string
   dynamicPassword?: string
   rememberSecret?: boolean
+  rememberSecretEnabled?: boolean
   connectMethod?: string
 }>();
 
@@ -212,7 +213,7 @@ function handleSpecialAccount(v: string) {
         />
       </UFormField>
 
-      <div class="flex justify-end items-center w-full">
+      <div v-if="rememberSecretEnabled !== false" class="flex justify-end items-center w-full">
         <USwitch v-model="localRememberSecret" :label="t('Account.RememberPassword')" />
       </div>
     </template>

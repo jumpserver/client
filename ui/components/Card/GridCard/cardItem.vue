@@ -13,7 +13,7 @@ const emits = defineEmits<{
   (e: "connectAsset", asset: AssetItem): void
   (e: "contextTrigger", asset: AssetItem): void
   (e: "editTrigger", asset: AssetItem): void
-  (e: "connectTrigger", asset: AssetItem): void
+  (e: "connectTrigger", asset: AssetItem, protocol?: string): void
 }>();
 
 const { t } = useI18n();
@@ -44,6 +44,10 @@ const handleContextMenu = (event: MouseEvent) => {
  */
 const handleContextTrigger = (asset: AssetItem) => {
   emits("contextTrigger", asset);
+};
+
+const handleConnectTrigger = (asset: AssetItem, protocol?: string) => {
+  emits("connectTrigger", asset, protocol);
 };
 
 /**
@@ -148,7 +152,7 @@ const cancelRename = () => {
     @update:visible="contextMenuVisible = $event"
     @context-trigger="handleContextTrigger"
     @edit-trigger="emits('editTrigger', props.asset)"
-    @connect-trigger="emits('connectTrigger', props.asset)"
+    @connect-trigger="handleConnectTrigger"
     @rename-trigger="handleRenameTrigger"
   />
 </template>
