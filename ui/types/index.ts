@@ -91,6 +91,7 @@ export interface UserData {
   availableOrgs: PermOrgItem[]
   connectionInfo: ConnectionInfo
   xpackLicenseValid?: boolean
+  securityLunaRememberAuth?: boolean
 }
 
 export interface UserIntiInfo {
@@ -98,6 +99,7 @@ export interface UserIntiInfo {
   bearer: string
   version?: string
   xpack_license_valid?: boolean
+  security_luna_remember_auth?: boolean
   resolved_site?: string
   profile: {
     data: string

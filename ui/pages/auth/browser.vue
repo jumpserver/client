@@ -86,8 +86,16 @@ onMounted(async () => {
   });
 
   unlistenLoginSuccessRef.value = await useTauriEventListen("login-success-detected", async (event) => {
-    const { status, profile, bearer, current_org, resolved_site, permission_orgs, xpack_license_valid }
-      = event.payload as UserIntiInfo & { bearer: string };
+    const {
+      status,
+      profile,
+      bearer,
+      current_org,
+      resolved_site,
+      permission_orgs,
+      xpack_license_valid,
+      security_luna_remember_auth
+    } = event.payload as UserIntiInfo & { bearer: string };
 
     const profileData = JSON.parse((profile as any).data);
     const currentOrgData = JSON.parse((current_org as any).data);
@@ -106,6 +114,7 @@ onMounted(async () => {
         system_roles: profileData.system_roles,
         availableOrgs,
         xpackLicenseValid: xpack_license_valid ?? false,
+        securityLunaRememberAuth: security_luna_remember_auth !== false,
         connectionInfo: {
           protocol: "",
           username: ""

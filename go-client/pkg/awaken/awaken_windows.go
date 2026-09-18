@@ -377,10 +377,6 @@ func handleDB(r *Rouse, cfg *config.AppConfig) (*exec.Cmd, error) {
 		connectMap["config_file"] = currentPath
 
 	}
-	if appItem.Name == "navicat17" {
-		url := getNavicatURL(connectMap)
-		connectMap["url"] = url
-	}
 	if len(appItem.AutoIt) == 0 {
 		commands := getCommandFromArgs(connectMap, getDatabaseArgFormat(r, appItem))
 		if appItem.Name == "heidisql" && r.Protocol == "postgresql" {

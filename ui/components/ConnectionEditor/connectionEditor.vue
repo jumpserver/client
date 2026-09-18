@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { AssetItem, AssetPageType, ConnectionInfo, PermedAccount, PermedProtocol } from "~/types/index";
 import EditForm from "~/components/EditForm/editForm.vue";
+import { useUserInfoStore } from "~/store/modules/userInfo";
 
 const props = defineProps<{
   assetType?: AssetPageType
@@ -9,6 +10,8 @@ const props = defineProps<{
 const { t, locale } = useI18n();
 const toast = useToast();
 const { getAssetDetail } = useAssetAction();
+const userInfoStore = useUserInfoStore();
+const { rememberAuthEnabled } = storeToRefs(userInfoStore);
 const ASSET_DETAIL_TIMEOUT_MS = 15000;
 
 const open = ref(false);
@@ -69,9 +72,9 @@ const initDraft = (asset: AssetItem, preferredProtocol?: string) => {
   }
 
   draftManualUsername.value = saved?.manualUsername || "";
-  draftManualPassword.value = saved?.manualPassword || "";
-  draftDynamicPassword.value = saved?.dynamicPassword || "";
-  draftRememberSecret.value = saved?.rememberSecret || false;
+  draftManualPassword.value = rememberAuthEnabled.value ? saved?.manualPassword || "" : "";
+  draftDynamicPassword.value = rememberAuthEnabled.value ? saved?.dynamicPassword || "" : "";
+  draftRememberSecret.value = rememberAuthEnabled.value && !!saved?.rememberSecret;
   draftConnectMethod.value
     = !preferredProtocol || preferredProtocol === saved?.protocol ? saved?.connectMethod || "" : "";
 };
@@ -123,7 +126,7 @@ const buildConnectionInfo = () => {
     manualUsername: draftManualUsername.value || "",
     manualPassword: draftManualPassword.value || "",
     dynamicPassword: draftDynamicPassword.value || "",
-    rememberSecret: !!draftRememberSecret.value,
+    rememberSecret: rememberAuthEnabled.value && !!draftRememberSecret.value,
     connectMethod: draftConnectMethod.value || "",
     availableProtocols: normalizeProtocols()
   };
@@ -274,6 +277,7 @@ defineExpose({ open: openModal, close });
       v-model:dynamic-password="draftDynamicPassword"
       v-model:remember-secret="draftRememberSecret"
       v-model:connect-method="draftConnectMethod"
+      :remember-secret-enabled="rememberAuthEnabled"
       :accounts="currentAsset.permedAccounts || []"
       :protocols="currentAsset.permedProtocols || []"
       :asset-type="props.assetType"

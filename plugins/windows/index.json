@@ -32,11 +32,6 @@
       "category": "remotedesktop"
     },
     {
-      "id": "windows.navicat17",
-      "name": "navicat17",
-      "category": "databases"
-    },
-    {
       "id": "windows.plsql",
       "name": "plsql",
       "category": "databases"

@@ -22,6 +22,7 @@ export const useUserInfoStore = defineStore(
 
     const hasUser = computed(() => Object.keys(userMap.value).length > 0);
     const orgId = computed(() => currentUser.value?.org?.id || "");
+    const rememberAuthEnabled = computed(() => currentUser.value?.securityLunaRememberAuth !== false);
 
     /**
      * @description 将当前前端会话同步给 Rust 请求层
@@ -296,6 +297,7 @@ export const useUserInfoStore = defineStore(
 
     return {
       orgId,
+      rememberAuthEnabled,
       userMap,
       loggedIn,
       currentSite,
