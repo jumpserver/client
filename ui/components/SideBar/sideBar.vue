@@ -46,21 +46,9 @@ const sideBarItems = computed<NavigationMenuItem[]>(() => {
       disabled: isLoading.value
     },
     {
-      label: t("Menu.Web"),
-      icon: "mingcute:web-line",
-      to: localePath("web"),
-      disabled: isLoading.value
-    },
-    {
       label: t("Menu.Other"),
       icon: "lucide:boxes",
       to: localePath("other"),
-      disabled: isLoading.value
-    },
-    {
-      label: t("Menu.Favorite"),
-      icon: "gravity-ui:star",
-      to: localePath("favorite"),
       disabled: isLoading.value
     }
   ];
