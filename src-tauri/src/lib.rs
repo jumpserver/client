@@ -32,7 +32,7 @@ use crate::commands::video_player::{
 use crate::commands::window_control::{close_window, minimize_window, toggle_maximize_window};
 use crate::service::oauth::AuthFlowState;
 use crate::transcode::transcode_replays;
-use crate::utils::is_auth_callback;
+use crate::utils::{is_auth_callback, is_deep_link};
 
 use log::{error, info, warn};
 use tauri::Manager;
@@ -97,7 +97,7 @@ pub fn run() {
             info!("single_instance event, argv={:?}", argv);
 
             for arg in argv {
-                if arg.starts_with("jms://") {
+                if is_deep_link(&arg) {
                     let did_pull_up = process_deep_link(app, &arg);
                     info!(
                         "single_instance processed deep link, did_pull_up={}",

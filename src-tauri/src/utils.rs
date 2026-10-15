@@ -11,10 +11,27 @@ const MAX_WINDOW_WIDTH: f64 = 1800.0;
 const MAX_WINDOW_HEIGHT: f64 = 1000.0;
 const WINDOW_SIZE_UNIT_LOGICAL: &str = "logical";
 
+/// 支持的 deep link scheme。
+///
+/// `jms2` 是 JumpServer 服务端当前下发的 scheme（v5 起），`jms` 是历史遗留值，
+/// 仍然接受是为了兼容尚未升级的旧服务端与已安装客户端写入的旧链接。
+const DEEP_LINK_SCHEMES: [&str; 2] = ["jms2", "jms"];
+
+/// 判断是否为支持的自定义协议链接（OAuth 回调或连接唤醒）。
+pub fn is_deep_link(raw_url: &str) -> bool {
+    match Url::parse(raw_url) {
+        Ok(url) => DEEP_LINK_SCHEMES.contains(&url.scheme()),
+        // 解析失败时退回字符串前缀判断，避免个别畸形链接被静默丢弃。
+        Err(_) => DEEP_LINK_SCHEMES
+            .iter()
+            .any(|scheme| raw_url.starts_with(&format!("{scheme}://"))),
+    }
+}
+
 /// 判断是否为 OAuth 回调 deeplink
 pub fn is_auth_callback(raw_url: &str) -> bool {
     if let Ok(url) = Url::parse(raw_url) {
-        return url.scheme() == "jms"
+        return DEEP_LINK_SCHEMES.contains(&url.scheme())
             && url
                 .host_str()
                 .map(|h| h.eq_ignore_ascii_case("auth"))

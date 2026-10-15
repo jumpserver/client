@@ -370,11 +370,16 @@ fn expires_at_timestamp(expires_in: Option<std::time::Duration>) -> Option<i64> 
 }
 
 /// 根据运行模式返回 OAuth redirect_uri。
+///
+/// Release 使用 `jms2://`，与 JumpServer 服务端注册的回调保持一致：
+/// `jumpserver.settings.libs.OAUTH2_PROVIDER_CLIENT_REDIRECT_URI` 与
+/// `ALLOWED_REDIRECT_URI_SCHEMES` 均为 `jms2`，服务端会拒绝其它 scheme
+/// （`jms://auth/callback` 直接返回 `invalid_request / Mismatching redirect URI`）。
 fn oauth_redirect_uri() -> &'static str {
     if cfg!(debug_assertions) {
         "http://127.0.0.1:14876/auth/callback"
     } else {
-        "jms://auth/callback"
+        "jms2://auth/callback"
     }
 }
 

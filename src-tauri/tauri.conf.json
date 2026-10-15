@@ -53,7 +53,7 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["jms"]
+        "schemes": ["jms2"]
       }
     }
   },
