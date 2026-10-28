@@ -349,8 +349,7 @@ func handleDB(r *Rouse, cfg *config.AppConfig) (*exec.Cmd, error) {
 
 	}
 	if appItem.Name == "navicat17" {
-		url := getNavicatURL(connectMap)
-		connectMap["url"] = url
+		return exec.Command(appPath, "-uri", getNavicatURL(connectMap)), nil
 	}
 	if len(appItem.AutoIt) == 0 {
 		commands := getCommandFromArgs(connectMap, getDatabaseArgFormat(r, appItem))

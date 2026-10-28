@@ -1,6 +1,7 @@
 package awaken
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -23,5 +24,30 @@ func TestNavicatSharedMySQLWireProfile(t *testing.T) {
 				t.Fatal("Navicat URL generation changed the asset protocol")
 			}
 		})
+	}
+}
+
+func TestNavicatURICredentials(t *testing.T) {
+	info := map[string]string{
+		"protocol": "sqlserver", "host": "proxy.example", "port": "5528",
+		"name": "root@db asset", "username": "token &+",
+		"value": "secret &+=?#% ^(){}~*\" 中文", "dbname": "db &+ 中文",
+	}
+	u, err := url.Parse(getNavicatURL(info))
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := u.Query()
+	for key, want := range map[string]string{
+		"Conn.Name": "db asset", "Conn.Username": info["username"],
+		"Conn.Password": info["value"], "Conn.InitialDatabase": info["dbname"],
+		"Conn.AuthenticationType": "Default",
+	} {
+		if len(query[key]) != 1 || query.Get(key) != want {
+			t.Errorf("%s did not round trip", key)
+		}
+	}
+	if u.Fragment != "" {
+		t.Fatal("URI contains an unexpected fragment")
 	}
 }

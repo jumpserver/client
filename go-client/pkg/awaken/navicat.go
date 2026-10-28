@@ -1,7 +1,7 @@
 package awaken
 
 import (
-	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -24,23 +24,27 @@ func getNavicatURL(connectInfo map[string]string) string {
 	if len(matches) > 1 {
 		name = matches[1]
 	}
-	url := fmt.Sprintf("navicat://conn.%s?Conn.Host=%s&Conn.Name=%s&Conn.Port=%s&Conn.Username=%s",
-		navicatWireProtocol(connectInfo["protocol"]), connectInfo["host"], name, connectInfo["port"], connectInfo["username"])
-	switch connectInfo["protocol"] {
-	case "oracle":
-		url = strings.Replace(url, "conn.oracle", "conn.ora", 1)
-		url += fmt.Sprintf("&Conn.ServiceName=%s&Conn.ServiceNameType=ServiceName&Conn.ConnectionMode=Basic", connectInfo["dbname"])
-	case "sqlserver":
-		url = strings.Replace(url, "conn.sqlserver", "conn.mssql", 1)
-		url += fmt.Sprintf("&Conn.AuthenticationType=Default&Conn.InitialDatabase=%s", connectInfo["dbname"])
-	case "postgresql":
-		url = strings.Replace(url, "conn.postgresql", "conn.pgsql", 1)
-		url += fmt.Sprintf("&Conn.InitialDatabase=%s", connectInfo["dbname"])
+	query := url.Values{
+		"Conn.Host":     {connectInfo["host"]},
+		"Conn.Name":     {name},
+		"Conn.Port":     {connectInfo["port"]},
+		"Conn.Username": {connectInfo["username"]},
+		"Conn.Password": {connectInfo["value"]},
 	}
-
-	pattern := regexp.MustCompile(`[\^(){}~]`)
-	url = pattern.ReplaceAllStringFunc(url, func(match string) string {
-		return fmt.Sprintf("{%s}", match)
-	})
-	return url
+	protocol := navicatWireProtocol(connectInfo["protocol"])
+	switch protocol {
+	case "oracle":
+		protocol = "ora"
+		query.Set("Conn.ServiceName", connectInfo["dbname"])
+		query.Set("Conn.ServiceNameType", "ServiceName")
+		query.Set("Conn.ConnectionMode", "Basic")
+	case "sqlserver":
+		protocol = "mssql"
+		query.Set("Conn.AuthenticationType", "Default")
+		query.Set("Conn.InitialDatabase", connectInfo["dbname"])
+	case "postgresql":
+		protocol = "pgsql"
+		query.Set("Conn.InitialDatabase", connectInfo["dbname"])
+	}
+	return "navicat://conn." + protocol + "?" + query.Encode()
 }
