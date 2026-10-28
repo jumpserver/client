@@ -122,6 +122,9 @@ func handleVNC(r *Rouse, cfg *config.AppConfig) *exec.Cmd {
 		"host":     r.Host,
 		"port":     strconv.Itoa(r.Port),
 	}
+	if appItem.Name == "realvnc" {
+		return handleRealVNC(r, appItem)
+	}
 	if len(appItem.AutoIt) == 0 {
 		commands := getCommandFromArgs(connectMap, appItem.ArgFormat)
 		cmd := exec.Command(appItem.Path, strings.Split(commands, " ")...)
@@ -190,6 +193,82 @@ func handleVNC(r *Rouse, cfg *config.AppConfig) *exec.Cmd {
 		}
 		return exec.Command("")
 	}
+}
+
+func handleRealVNC(r *Rouse, appItem *config.AppItem) *exec.Cmd {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		reportErrorf("Failed to locate RealVNC config directory: %v", err)
+		return nil
+	}
+	dir = filepath.Join(dir, "jumpserver-client")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		reportErrorf("Failed to create RealVNC config directory: %v", err)
+		return nil
+	}
+	// A unique file avoids deleting another connection's configuration.
+	file, err := os.CreateTemp(dir, "realvnc-*.vnc")
+	if err != nil {
+		reportErrorf("Failed to create RealVNC connection file: %v", err)
+		return nil
+	}
+	defer os.Remove(file.Name())
+	content := fmt.Sprintf("[Connection]\nHost=%s:%d\nWarnUnencrypted=0\nUserName=%s\n",
+		r.Host, r.Port, r.getUserName())
+	_, writeErr := file.WriteString(content)
+	closeErr := file.Close()
+	if writeErr != nil || closeErr != nil {
+		reportError("Failed to write RealVNC connection file")
+		return nil
+	}
+
+	cmd := exec.Command(appItem.Path, "-VerifyId", "0", file.Name())
+	if err := cmd.Start(); err != nil {
+		reportErrorf("Failed to start RealVNC Viewer: %v", err)
+		return nil
+	}
+	defer cmd.Process.Release()
+	autoit.LoadAuto()
+	winTitle := "Authentication"
+	active := false
+	for i := 0; i <= 30; i++ {
+		if autoit.WinWaitActive(winTitle, "", 1) != 0 {
+			active = true
+			break
+		}
+		autoit.WinActivate(winTitle, "")
+		time.Sleep(300 * time.Millisecond)
+	}
+	if !active {
+		reportError("Timed out waiting for RealVNC Authentication dialog")
+		return nil
+	}
+	control := autoit.ControlGetFocus(winTitle, "")
+	if control == "" {
+		reportError("Could not locate RealVNC authentication control")
+		return nil
+	}
+	text := strings.TrimSpace(autoit.ControlGetText(winTitle, "", control))
+	username := strings.TrimSpace(r.getUserName())
+	if username != "" && text == username {
+		autoit.ControlSend(winTitle, "", control, "{TAB}")
+		time.Sleep(300 * time.Millisecond)
+		nextControl := autoit.ControlGetFocus(winTitle, "")
+		if nextControl == "" || nextControl == control {
+			reportError("Could not focus RealVNC password control")
+			return nil
+		}
+		control = nextControl
+	}
+	// Address the control explicitly so a focus change cannot type the password
+	// into another foreground application.
+	if autoit.ControlSend(winTitle, "", control, "^a") == 0 ||
+		autoit.ControlSend(winTitle, "", control, r.Value, 1) == 0 ||
+		autoit.ControlSend(winTitle, "", control, "{ENTER}") == 0 {
+		reportError("Failed to fill RealVNC authentication dialog")
+		return nil
+	}
+	return exec.Command("cmd", "/C", "exit", "0")
 }
 
 func handleSSH(r *Rouse, cfg *config.AppConfig) *exec.Cmd {
