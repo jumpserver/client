@@ -31,7 +31,7 @@ ICON_MAP: dict[str, str] = {
     "winscp": "winscp",
     "securefx": "securecrt",
     "xftp": "xftp",
-    "navicat17": "navicat17",
+    "navicat18": "navicat18",
     "plsql": "plsql",
     "dbeaver": "dbeaver",
     "heidisql": "heidisql",
@@ -52,7 +52,7 @@ PLUGIN_IDS: dict[tuple[str, str], str] = {
     ("windows_rdm", "remotedesktop"): "windows-rdm",
     ("another_redis", "databases"): "another-redis",
     ("mongo_compass", "databases"): "mongo-compass",
-    ("navicat17", "databases"): "navicat17",
+    ("navicat18", "databases"): "navicat18",
     ("ssms17", "databases"): "ssms17",
 }
 

@@ -42,7 +42,7 @@ const imagesMap: Record<string, string | undefined> = {
   plsql: getImageByName("plsql"),
   ssms17: getImageByName("ssms17"),
   resp: getImageByName("resp"),
-  navicat17: getImageByName("navicat17"),
+  navicat18: getImageByName("navicat18"),
   royalts: getImageByName("royalts"),
   windows_rdm: getImageByName("windows_rdm"),
   toad: getImageByName("toad")
