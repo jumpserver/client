@@ -11,7 +11,7 @@ use crate::setup::menu::{build_menu, handle_menu_event};
 use crate::setup::setup_tray;
 
 use crate::api::session::ApiSessionStore;
-use crate::commands::api_session::{set_api_org, set_api_session};
+use crate::commands::api_session::{check_client_session, set_api_org, set_api_session};
 use crate::commands::asset_actions::{
     get_asset_detail, get_assets, rename, set_favorite, unfavorite,
 };
@@ -209,6 +209,7 @@ pub fn run() {
             update_config_selection,
             init_http_callback_server,
             get_connect_methods,
+            check_client_session,
             set_api_session,
             set_api_org,
             write_video_player_gzip_file,
@@ -216,6 +217,24 @@ pub fn run() {
             delete_video_player_file,
             transcode_replays,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                static EXITING: std::sync::atomic::AtomicBool =
+                    std::sync::atomic::AtomicBool::new(false);
+                if !EXITING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    api.prevent_exit();
+                    let app = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = tokio::time::timeout(
+                            std::time::Duration::from_secs(3),
+                            service::client_session::revoke_on_exit(),
+                        )
+                        .await;
+                        app.exit(code.unwrap_or(0));
+                    });
+                }
+            }
+        });
 }

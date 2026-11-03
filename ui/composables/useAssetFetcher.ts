@@ -31,6 +31,7 @@ export const useAssetFetcher = (assetType: AssetPageType, scrollRef?: Ref<HTMLEl
   const rawAssetsList = ref<RawAssetData[]>([]);
   const lastDetailAssetId = ref<string | null>(null);
   const activeRequestId = ref<string | null>(null);
+  const activeRequestSite = ref("");
   const subscribeGetAssetsEvent = ref<UnlistenFn | null>(null);
   const subscribeGetAssetFailedEvent = ref<UnlistenFn | null>(null);
   const subscribeGetFavoriteAssetsEvent = ref<UnlistenFn | null>(null);
@@ -298,6 +299,7 @@ export const useAssetFetcher = (assetType: AssetPageType, scrollRef?: Ref<HTMLEl
 
     const requestId = createAssetRequestId(assetType);
     activeRequestId.value = requestId;
+    activeRequestSite.value = currentSite.value;
     beginLoading();
 
     try {
@@ -363,7 +365,7 @@ export const useAssetFetcher = (assetType: AssetPageType, scrollRef?: Ref<HTMLEl
       if (!isLoading.value) return;
       if (!isActiveForCurrentRoute()) return;
       // 全局事件会被所有菜单实例收到，只允许当前活动请求修改本菜单状态。
-      if (resp.request_id !== activeRequestId.value) return;
+      if (resp.request_id !== activeRequestId.value || activeRequestSite.value !== currentSite.value) return;
 
       activeRequestId.value = null;
       const pageResults = resp.data.results ?? [];
@@ -384,7 +386,8 @@ export const useAssetFetcher = (assetType: AssetPageType, scrollRef?: Ref<HTMLEl
       if (!isLoading.value) return;
       if (!isActiveForCurrentRoute()) return;
       // 过期请求失败不能结束新请求的 loading，也不能修改 hasMore 或登录状态。
-      if (payload.request_id !== activeRequestId.value) return;
+      if (payload.request_id !== activeRequestId.value || activeRequestSite.value !== currentSite.value) return;
+      const requestSite = activeRequestSite.value;
 
       activeRequestId.value = null;
       const status = payload.status;
@@ -402,7 +405,7 @@ export const useAssetFetcher = (assetType: AssetPageType, scrollRef?: Ref<HTMLEl
         });
 
         nextTick(() => {
-          deleteUserData(currentSite.value);
+          deleteUserData(requestSite);
         });
       }
 
@@ -476,6 +479,11 @@ export const useAssetFetcher = (assetType: AssetPageType, scrollRef?: Ref<HTMLEl
     );
 
     unsubscribeClearAssets = on("clearAssets", () => {
+      activeRequestId.value = null;
+      isLoading.value = false;
+      favoriteSet.value = new Set();
+      lastDetailAssetId.value = null;
+      getDetail.value = false;
       hasMore.value = true;
 
       offset.value = 0;

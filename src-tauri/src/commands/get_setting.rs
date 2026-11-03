@@ -1,5 +1,5 @@
 use crate::api::{request::ApiRequestClient, session::ApiSessionStore};
-use crate::commands::api_session::fresh_api_context;
+use crate::commands::api_session::{fresh_api_context, session_error_status};
 use crate::service::setting::SettingService;
 use log::{error, info};
 use serde_json::json;
@@ -15,7 +15,7 @@ pub async fn get_setting(
         Err(e) => {
             let _ = app.emit(
                 "get-setting-failure",
-                json!({ "status": 401, "error": e.to_string() }),
+                json!({ "status": session_error_status(&e), "error": e.to_string() }),
             );
             return Ok(());
         }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import type { PermissionOrgs, PermOrgItem, UserIntiInfo } from "~/types";
+import type { ClientSessionInfo, PermissionOrgs, PermOrgItem, UserIntiInfo } from "~/types";
 
 import { useUserInfoStore } from "~/store/modules/userInfo";
 
@@ -13,7 +13,7 @@ const route = useRoute();
 const localePath = useLocalePath();
 const userInfoStore = useUserInfoStore();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const { userTheme } = useThemeAdapter();
 
 const url = ref<string | null>((route.query.auth_url as string) || null);
@@ -86,8 +86,8 @@ onMounted(async () => {
   });
 
   unlistenLoginSuccessRef.value = await useTauriEventListen("login-success-detected", async (event) => {
-    const { status, profile, bearer, current_org, resolved_site, permission_orgs, xpack_license_valid }
-      = event.payload as UserIntiInfo & { bearer: string };
+    const { status, profile, bearer, current_org, resolved_site, permission_orgs, xpack_license_valid, client_login_session }
+      = event.payload as UserIntiInfo & { bearer: string, client_login_session?: ClientSessionInfo | null };
 
     const profileData = JSON.parse((profile as any).data);
     const currentOrgData = JSON.parse((current_org as any).data);
@@ -116,9 +116,26 @@ onMounted(async () => {
       userInfoStore.setCurrentOrg(currentOrgData);
       userInfoStore.setUserLoggedIn(true);
 
+      let description: string | undefined;
+      if (client_login_session) {
+        const { max_session_time: minutes, expires_at } = client_login_session;
+        if (expires_at) {
+          const hours = Math.floor(minutes / 60);
+          const duration = [
+            hours ? t("Login.LifetimeHours", { hours }) : "",
+            minutes % 60 ? t("Login.LifetimeMinutes", { minutes: minutes % 60 }) : ""
+          ].filter(Boolean).join(" ");
+          const at = new Date(expires_at).toLocaleString(locale.value);
+          description = t("Login.LifetimeUntil", { at, duration });
+        } else if (minutes === 0) {
+          description = t("Login.LifetimeUnlimited");
+        }
+      }
+
       nextTick(() => {
         toast.add({
           title: t("Login.LoginSuccess"),
+          description,
           color: "primary",
           icon: "line-md:check-all",
           progress: true

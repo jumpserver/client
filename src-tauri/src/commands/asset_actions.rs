@@ -2,7 +2,7 @@ use crate::api::{
     request::ApiRequestClient,
     session::{ApiSessionContext, ApiSessionStore},
 };
-use crate::commands::api_session::fresh_api_context;
+use crate::commands::api_session::{fresh_api_context, session_error_status};
 use crate::service::asset::{AssetQuery, AssetService};
 use log::{error, info};
 use serde_json::{json, Value};
@@ -49,7 +49,7 @@ pub async fn get_assets(
             error!("load asset service failed: {}", error);
             let _ = app.emit(
                 "get-asset-failure",
-                json!({ "status": 401, "request_id": request_id }),
+                json!({ "status": session_error_status(&error), "request_id": request_id }),
             );
             return Ok(());
         }
@@ -125,7 +125,7 @@ pub async fn get_asset_detail(
         Err(error) => {
             let _ = app.emit(
                 "get-asset-detail-failure",
-                json!({ "status": 401, "error": error }),
+                json!({ "status": session_error_status(&error), "error": error }),
             );
             return Ok(());
         }

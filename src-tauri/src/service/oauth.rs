@@ -1,21 +1,45 @@
-use crate::api::client::oauth_client;
+use crate::api::client::oauth_client_for_origin;
 use crate::api::endpoint;
-use crate::service::token::TokenService;
+use crate::service::client_session::{self, ClientLoginPolicy, ClientLoginSession};
+use crate::service::token::{TokenRecord, TokenService};
 use anyhow::Result;
 use chrono::{Duration, Utc};
 use oauth2::{
-    basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, CsrfToken, EndpointNotSet,
-    EndpointSet, ErrorResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken,
-    RequestTokenError, RevocationUrl, Scope, StandardRevocableToken, TokenResponse, TokenUrl,
+    basic::{
+        BasicClient, BasicErrorResponse, BasicRevocationErrorResponse,
+        BasicTokenIntrospectionResponse, BasicTokenType,
+    },
+    AuthUrl, AuthorizationCode, ClientId, CsrfToken, EndpointNotSet, EndpointSet, ErrorResponse,
+    ExtraTokenFields, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken,
+    RequestTokenError, RevocationUrl, Scope, StandardRevocableToken, StandardTokenResponse,
+    TokenResponse, TokenUrl,
 };
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tokio::sync::oneshot;
 use url::Url;
 
-pub type JumpServerOAuthClient =
-    BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
+type ClientOAuth<HasAuthUrl = EndpointNotSet, HasTokenUrl = EndpointNotSet> = oauth2::Client<
+    BasicErrorResponse,
+    StandardTokenResponse<ClientTokenFields, BasicTokenType>,
+    BasicTokenIntrospectionResponse,
+    StandardRevocableToken,
+    BasicRevocationErrorResponse,
+    HasAuthUrl,
+    EndpointNotSet,
+    EndpointNotSet,
+    EndpointNotSet,
+    HasTokenUrl,
+>;
+pub type JumpServerOAuthClient = ClientOAuth<EndpointSet, EndpointSet>;
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ClientTokenFields {
+    pub client_login_policy: Option<ClientLoginPolicy>,
+    pub client_login_session: Option<ClientLoginSession>,
+}
+impl ExtraTokenFields for ClientTokenFields {}
 
 /// OAuth 授权请求阶段的数据。
 ///
@@ -44,6 +68,7 @@ pub struct OAuthTokenSet {
     pub access_token: String,
     pub refresh_token: Option<String>,
     pub expires_at: Option<i64>,
+    pub fields: ClientTokenFields,
 }
 
 /// OAuth callback 阶段解析出的参数。
@@ -63,6 +88,10 @@ pub struct CallbackParams {
 #[derive(Deserialize, Debug)]
 #[allow(dead_code)]
 pub struct OAuthConfig {
+    #[serde(default)]
+    pub client_login_policy: Option<ClientLoginPolicy>,
+    #[serde(default)]
+    pub client_login_policy_version: Option<u32>,
     pub issuer: String,
     pub client_id: String,
     pub authorization_endpoint: String,
@@ -76,6 +105,7 @@ pub struct OAuthConfig {
     pub code_challenge_methods_supported: Vec<String>,
     pub response_modes_supported: Vec<String>,
     pub token_expires_in: i64,
+    #[serde(default)]
     pub refresh_token_expires_in: i64,
 }
 
@@ -98,17 +128,47 @@ pub struct AuthFlowState {
 
 impl OAuthTokenSet {
     /// 将 OAuth token 写入本地安全存储。
-    pub async fn persist(&self, site: &str, client_id: &str) -> Result<()> {
-        let token_service = TokenService::new(site.to_string());
+    pub async fn persist(
+        &self,
+        site: &str,
+        client_id: &str,
+        policy: Option<ClientLoginPolicy>,
+        supported: bool,
+    ) -> Result<()> {
+        let lock = client_session::site_lock(site);
+        let _guard = lock.lock().await;
+        let mut record = TokenRecord {
+            access_token: self.access_token.clone(),
+            refresh_token: self.refresh_token.clone(),
+            expires_at: self.expires_at,
+            client_id: Some(client_id.to_string()),
+            policy,
+            policy_supported: Some(supported),
+            deadline: None,
+            monotonic_deadline: None,
+        };
+        self.apply_to(&mut record)?;
+        TokenService::new(site).save(&record).await
+    }
 
-        token_service
-            .persist(
-                &self.access_token,
-                self.refresh_token.as_deref(),
-                self.expires_at,
-                Some(client_id),
-            )
-            .await
+    pub(crate) fn apply_to(&self, record: &mut TokenRecord) -> Result<()> {
+        if record.policy_supported == Some(true) {
+            anyhow::ensure!(
+                self.fields.client_login_policy.is_some()
+                    && self.fields.client_login_session.is_some(),
+                "Missing client login policy or expiry in token response"
+            );
+        }
+        record.access_token = self.access_token.clone();
+        record.refresh_token = self.refresh_token.clone();
+        record.expires_at = self.expires_at;
+        if let Some(policy) = &self.fields.client_login_policy {
+            record.policy = Some(policy.clone());
+        }
+        if let Some(session) = &self.fields.client_login_session {
+            session.apply_to(record)?;
+        }
+        Ok(())
     }
 }
 
@@ -181,7 +241,11 @@ impl AuthFlowState {
 pub async fn fetch_oauth_config(site: &str, client: &Client) -> Result<OAuthConfig> {
     let config_url = format!("{}{}", site, endpoint::oauth::WELL_KNOWN);
 
-    let response = client.get(config_url).send().await?;
+    let response = client
+        .get(config_url)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await?;
     let status = response.status();
     let text = response.text().await?;
 
@@ -196,7 +260,7 @@ pub async fn fetch_oauth_config(site: &str, client: &Client) -> Result<OAuthConf
 
 /// 构建 JumpServer OAuth client。
 pub fn build_oauth_client(site: &str, client_id: &str) -> Result<JumpServerOAuthClient> {
-    let client = BasicClient::new(ClientId::new(client_id.to_string()))
+    let client = ClientOAuth::new(ClientId::new(client_id.to_string()))
         // 指定授权端点：用户会被重定向到这个 URL 登录授权
         .set_auth_uri(AuthUrl::new(format!(
             "{}{}",
@@ -226,6 +290,7 @@ pub fn create_authorization_request(client: &JumpServerOAuthClient) -> OAuthAuth
         .add_scope(Scope::new("write".to_string()))
         .add_scope(Scope::new("read".to_string()))
         .set_pkce_challenge(pkce_challenge)
+        .add_extra_param("client_login_policy_version", "1")
         .url();
 
     OAuthAuthorizationRequest {
@@ -282,6 +347,7 @@ pub async fn exchange_authorization_code(
     let token_result = client
         .exchange_code(callback.code)
         .set_pkce_verifier(callback.pkce_verifier)
+        .add_extra_param("client_login_policy_version", "1")
         .request_async(http_client)
         .await
         .inspect_err(log_token_exchange_error)
@@ -297,64 +363,34 @@ pub async fn exchange_authorization_code(
         access_token,
         refresh_token,
         expires_at,
+        fields: token_result.extra_fields().clone(),
     })
 }
 
 /// 撤销并删除本地保存的 OAuth token。
 pub async fn revoke_and_clear_tokens(site: &str) -> Result<()> {
-    let token_service = TokenService::new(site.to_string());
-
-    if let Some(entry) = token_service.load().await? {
+    let lock = client_session::site_lock(site);
+    let _guard = lock.lock().await;
+    let token_service = TokenService::new(site);
+    let entry = token_service.load().await?;
+    // Remove local credentials before waiting for the network.
+    let deleted = token_service.delete().await;
+    if let Some(entry) = entry {
         if let Some(refresh_token) = entry.refresh_token {
             let client_id = entry.client_id.unwrap_or_default();
-            let http_client = oauth_client()?;
-
+            let http_client = oauth_client_for_origin(site)?;
             if let Err(error) =
-                revoke_refresh_token(&site, &client_id, &refresh_token, &http_client).await
+                revoke_refresh_token(site, &client_id, &refresh_token, &http_client).await
             {
-                log::error!("revocation request failed: {}", error);
+                log::warn!("revocation request failed: {}", error);
             }
         }
-
-        token_service.delete().await?
     }
-
-    Ok(())
-}
-
-/// 确保 access_token 可用；如果即将过期，则使用 refresh_token 刷新并写回本地存储。
-pub async fn ensure_fresh_token(site: &str, provided: Option<&str>) -> Result<String> {
-    let token_service = TokenService::new(site.to_string());
-    let entry = token_service.load().await?;
-
-    let stored_access = entry.as_ref().map(|token| token.access_token.clone());
-    let stored_refresh = entry.as_ref().and_then(|token| token.refresh_token.clone());
-    let expires_at = entry.as_ref().and_then(|token| token.expires_at);
-    let client_id = entry
-        .as_ref()
-        .and_then(|token| token.client_id.clone())
-        .unwrap_or_default();
-
-    let mut access = stored_access.or_else(|| provided.map(str::to_string));
-
-    if should_refresh_token(expires_at) {
-        let refresh_token = stored_refresh
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("refresh_token missing for site {}", site))?;
-
-        let http_client = oauth_client()?;
-        let tokens = refresh_access_token(site, &client_id, refresh_token, &http_client).await?;
-
-        tokens.persist(site, &client_id).await?;
-
-        access = Some(tokens.access_token);
-    }
-
-    access.ok_or_else(|| anyhow::anyhow!("no access token available for site {}", site))
+    deleted
 }
 
 /// 判断 token 是否需要提前刷新。
-fn should_refresh_token(expires_at: Option<i64>) -> bool {
+pub(crate) fn should_refresh_token(expires_at: Option<i64>) -> bool {
     expires_at
         .map(|timestamp| timestamp <= Utc::now().timestamp() + 60)
         .unwrap_or(false)
@@ -379,20 +415,29 @@ fn oauth_redirect_uri() -> &'static str {
 }
 
 /// 使用 refresh_token 刷新 access_token。
-async fn refresh_access_token(
+pub(crate) async fn refresh_access_token(
     site: &str,
     client_id: &str,
     refresh_token: &str,
     http_client: &Client,
 ) -> Result<OAuthTokenSet> {
-    let client = BasicClient::new(ClientId::new(client_id.to_string())).set_token_uri(
+    let client = ClientOAuth::new(ClientId::new(client_id.to_string())).set_token_uri(
         TokenUrl::new(format!("{}{}", site, endpoint::oauth::TOKEN))?,
     );
 
     let token_result = client
         .exchange_refresh_token(&RefreshToken::new(refresh_token.to_string()))
+        .add_extra_param("client_login_policy_version", "1")
         .request_async(http_client)
-        .await?;
+        .await
+        .map_err(|error| match &error {
+            RequestTokenError::ServerResponse(response)
+                if response.error() == &oauth2::basic::BasicErrorResponseType::InvalidGrant =>
+            {
+                anyhow::anyhow!(client_session::EXPIRED)
+            }
+            _ => anyhow::anyhow!(error),
+        })?;
 
     let access_token = token_result.access_token().secret().to_owned();
     let refresh_token = token_result
@@ -405,6 +450,7 @@ async fn refresh_access_token(
         access_token,
         refresh_token: Some(refresh_token),
         expires_at,
+        fields: token_result.extra_fields().clone(),
     })
 }
 

@@ -28,13 +28,13 @@ export const useUserInfoStore = defineStore(
      * @param userData
      */
     const syncApiSession = (site: string, userData: UserData) => {
-      if (!site || !userData.bearerToken || !userData.org?.id) return;
+      if (!useTauriCoreIsTauri() || !site) return;
 
       void useTauriCoreInvoke("set_api_session", {
         sessionKey: site,
         origin: site,
         bearerToken: userData.bearerToken,
-        orgId: userData.org.id
+        orgId: userData.org?.id || ""
       }).catch((error) => {
         console.error("sync api session failed", error);
       });
@@ -90,18 +90,22 @@ export const useUserInfoStore = defineStore(
      * @description 删除用户数据
      * @param site
      */
-    const deleteUserData = (site: string) => {
+    const deleteUserData = (site: string, revoke = true) => {
       // 退出当前站点时立即请求清理其 Cookie
-      useTauriCoreInvoke("logout", {
-        name: "main",
-        site
-      });
+      if (revoke && useTauriCoreIsTauri()) {
+        void useTauriCoreInvoke("logout", { name: "main", site }).catch((error) => {
+          console.error("logout failed", error);
+        });
+      }
 
       if (!(site in userMap.value)) {
         return;
       }
 
       delete userMap.value[site];
+      // Expiring a background site must not switch or clear the foreground account.
+      if (site !== currentSite.value) return;
+      useEventBus().emit("clearAssets", undefined);
 
       // 如果还有用户，则切换到下一个用户
       if (hasUser.value) {
@@ -201,6 +205,7 @@ export const useUserInfoStore = defineStore(
       currentUser.value = updatedUserData as UserData;
       userMap.value[currentSite.value] = updatedUserData as SiteUserData;
 
+      if (!useTauriCoreIsTauri()) return;
       void useTauriCoreInvoke("set_api_org", {
         orgId: org.id
       }).catch((error) => {
@@ -310,6 +315,11 @@ export const useUserInfoStore = defineStore(
     persist: {
       key: "userInfo",
       storage: localStorage,
+      serializer: {
+        serialize: (state) => JSON.stringify(state, (key, value) =>
+          useTauriCoreIsTauri() && key === "bearerToken" ? "" : value),
+        deserialize: JSON.parse
+      },
       pick: [
         "userMap",
         "loggedIn",
