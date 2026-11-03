@@ -1,4 +1,5 @@
 pub(crate) mod asset;
+pub(crate) mod client_session;
 pub(crate) mod config;
 pub(crate) mod connect;
 pub(crate) mod oauth;

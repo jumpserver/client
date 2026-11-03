@@ -36,6 +36,8 @@ pub async fn auth_login(
         }
     };
 
+    let policy_supported = oauth_config.client_login_policy_version.is_some()
+        || oauth_config.client_login_policy.is_some();
     let client_id = oauth_config.client_id;
 
     let fut = async {
@@ -63,18 +65,28 @@ pub async fn auth_login(
         let tokens = exchange_authorization_code(&client, &http_client, callback).await?;
 
         // 保存 OAuth token，供后续请求自动刷新使用。
-        if let Err(e) = tokens.persist(&site, &client_id).await {
-            log::warn!("persist tokens failed: {}", e);
-        }
+        tokens
+            .persist(
+                &site,
+                &client_id,
+                oauth_config.client_login_policy,
+                policy_supported,
+            )
+            .await?;
+        let access_token = crate::service::client_session::checked_token(&site).await?;
 
         // 发起请求
-        let user_service = UserService::new(site.clone(), tokens.access_token.clone())?;
+        let user_service = UserService::new(site.clone(), access_token.clone())?;
         let (profile, permission_orgs, current_org, xpack_message) = tokio::join!(
             user_service.get_user_profile(),
             user_service.get_permission_orgs(),
             user_service.get_current_org(),
             user_service.get_xpack_message(),
         );
+
+        if profile.status != 200 || !profile.success {
+            anyhow::bail!("Unable to validate the user profile");
+        }
 
         let license_valid = if xpack_message.status == 200 && xpack_message.success {
             serde_json::from_str::<Value>(&xpack_message.data)
@@ -93,12 +105,13 @@ pub async fn auth_login(
             "login-success-detected",
             serde_json::json!({
                 "status": "success",
-                "bearer": tokens.access_token,
+                "bearer": access_token,
                 "profile": profile,
                 "resolved_site": site,
                 "current_org": current_org,
                 "xpack_license_valid": license_valid,
                 "permission_orgs": permission_orgs,
+                "client_login_session": crate::service::client_session::session_info(&site).await?,
             }),
         );
 

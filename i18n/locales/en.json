@@ -263,7 +263,17 @@
     "InvalidCertificateGeneric": "Login failed: certificate or secure connection issue.",
     "NetworkError": "Login failed: network error. Please check connectivity.",
     "VersionIncompatible": "The client version is incompatible with JumpServer versions earlier than v4.10.12-lts. Please download and use the v3.0.7 client.",
-    "VersionNoMatch": "The client version does not match the JumpServer version. Please download and use the v{version} client, or upgrade JumpServer to the latest version."
+    "VersionNoMatch": "The client version does not match the JumpServer version. Please download and use the v{version} client, or upgrade JumpServer to the latest version.",
+    "SessionChecking": "Checking client sign-in…",
+    "SessionCheckFailed": "Unable to verify sign-in. Check your connection and try again.",
+    "SessionRetry": "Retry",
+    "LifetimeUntil": "This sign-in expires at {at} ({duration})",
+    "LifetimeHours": "{hours}h",
+    "LifetimeMinutes": "{minutes}m",
+    "LifetimeUnlimited": "No maximum login lifetime is configured",
+    "LifetimeSoon": "Sign-in expires soon",
+    "LifetimeSoonDescription": "{site}: {remaining} remaining. Sign-in expires at {at}; please sign in again then.",
+    "LifetimeCountdown": "{minutes}m {seconds}s"
   },
   "Asset": {
     "GetAssetFailed": "Get asset failed, please refresh and try again"

@@ -5,6 +5,7 @@ import type { LangType, LanguagePreference } from "~/types";
 import { resolveLanguageFromSystem } from "~/utils";
 
 useApplicationConfig();
+const { sessionReady, sessionError, retrySession } = useClientSession();
 
 let applyLanguageSeq = 0;
 const LOCALE_PREFIX_RE = /^\/[a-z]{2}(?:-[A-Z]{2})?(?=\/|$)/;
@@ -204,7 +205,14 @@ onBeforeUnmount(() => {
     <Body class="font-sans antialiased h-screen w-screen">
       <UApp>
         <NuxtLayout>
-          <NuxtPage :page-key="pageKey" />
+          <NuxtPage v-if="sessionReady || pageKey.startsWith('/auth/')" :page-key="pageKey" />
+          <div v-else class="h-full flex items-center justify-center gap-3" role="status">
+            <UIcon name="i-lucide-loader-circle" :class="{ 'animate-spin': !sessionError }" />
+            <span>{{ $t(sessionError ? "Login.SessionCheckFailed" : "Login.SessionChecking") }}</span>
+            <UButton v-if="sessionError" icon="i-lucide-refresh-cw" color="neutral" variant="outline" @click="retrySession">
+              {{ $t("Login.SessionRetry") }}
+            </UButton>
+          </div>
         </NuxtLayout>
       </UApp>
     </Body>

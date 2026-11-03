@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::api::{request::ApiRequestClient, session::ApiSessionStore};
-use crate::commands::api_session::fresh_api_context;
+use crate::commands::api_session::{fresh_api_context, session_error_status};
 use crate::commands::client_launcher::pull_up;
 use crate::service::connect::{ConnectService, TokenRequestBody};
 
@@ -20,7 +20,7 @@ pub async fn get_connect_token(
         Err(e) => {
             let _ = app.emit(
                 "get-token-failure",
-                json!({ "status": 401, "data": e.to_string() }),
+                json!({ "status": session_error_status(&e), "data": e.to_string() }),
             );
             return Ok(());
         }

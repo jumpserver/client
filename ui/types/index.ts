@@ -10,6 +10,12 @@ export type CharsetType = "default" | "utf8" | "gbk" | "gb2312" | "ios-8859-1";
 export type ResolutionType = "auto" | "1024x768" | "1366x768" | "1600x900" | "1920x1080";
 export type AssetPageType = "linux" | "windows" | "windows_ad" | "other" | "database" | "device" | "web" | "favorite";
 
+export interface ClientSessionInfo {
+  max_session_time: number
+  expires_at: string | null
+  remaining_seconds: number | null
+}
+
 export interface ActionItem {
   key: string
   iconName: string

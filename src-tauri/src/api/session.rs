@@ -45,15 +45,30 @@ impl ApiSessionStore {
     }
 
     /// 更新当前会话保存的 bearer token
-    pub fn update_current_bearer_token(&self, bearer_token: String) -> Result<(), String> {
+    pub fn update_bearer_token(&self, origin: &str, bearer_token: String) -> Result<(), String> {
         let mut values = self.values.write().expect("api session lock poisoned");
         let session_key = values
             .get(CURRENT_SESSION_KEY)
             .cloned()
             .ok_or_else(|| "missing current api session".to_string())?;
 
-        values.insert(Self::field_key(&session_key, "bearer_token"), bearer_token);
+        if values
+            .get(&Self::field_key(&session_key, "origin"))
+            .map(String::as_str)
+            == Some(origin)
+        {
+            values.insert(Self::field_key(&session_key, "bearer_token"), bearer_token);
+        }
         Ok(())
+    }
+
+    pub fn clear_site(&self, site: &str) {
+        let mut values = self.values.write().expect("api session lock poisoned");
+        let prefix = format!("session:{}:", site);
+        values.retain(|key, _| !key.starts_with(&prefix));
+        if values.get(CURRENT_SESSION_KEY).map(String::as_str) == Some(site) {
+            values.remove(CURRENT_SESSION_KEY);
+        }
     }
 
     /// 读取当前会话上下文，缺少任一关键字段时返回 None
