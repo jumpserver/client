@@ -7,6 +7,9 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use url::Url;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Category {
@@ -252,6 +255,8 @@ impl AssetService {
             let response = self.fetch_all_assets(url, sub_query).await;
             let list = match response {
                 Ok(list) => list,
+                // Community servers reject windows_ad, but ordinary Windows assets remain usable.
+                Err(err) if Self::is_unsupported_windows_ad(sub_query, &err) => continue,
                 Err(err) => return err,
             };
 
@@ -291,6 +296,21 @@ impl AssetService {
             })
             .to_string(),
         )
+    }
+
+    fn is_unsupported_windows_ad(query: &AssetQuery, response: &ApiResponse) -> bool {
+        if !matches!(query.r#type, Some(Category::WindowsAd)) || response.status != 400 {
+            return false;
+        }
+        let Ok(errors) = serde_json::from_str::<serde_json::Map<String, Value>>(&response.data)
+        else {
+            return false;
+        };
+        errors.len() == 1
+            && errors
+                .get("type")
+                .and_then(Value::as_array)
+                .is_some_and(|messages| !messages.is_empty())
     }
 
     async fn fetch_all_assets(
