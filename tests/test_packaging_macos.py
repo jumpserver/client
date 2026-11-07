@@ -115,6 +115,60 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(sleep.call_args_list, [call(5), call(5)])
         self.assertEqual(unlink.call_count, 2)
 
+    def test_signed_dmg_uses_inline_code_requirement(self):
+        # -R with a separate value is parsed as a requirement *file path*, which fails
+        # with "invalid requirement specification". The Developer ID check must be inline.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / 'OSMClient.app'
+            helpers = source / 'Contents/Resources/bin/darwin-arm64'
+            (helpers / 'Scripts').mkdir(parents=True)
+            for name in ('JumpServerClient', 'client', 'Scripts/iterm2_loader.scpt'):
+                path = helpers / name
+                path.write_text('synthetic fixture')
+                path.chmod(0o755)
+            info = {'CFBundleShortVersionString': '4.1.4',
+                    'CFBundleURLTypes': [{'CFBundleURLSchemes': ['jms']}]}
+            (source / 'Contents/Info.plist').write_bytes(plistlib.dumps(info))
+            output = root / 'OSMClient-4.1.4-macos-arm64.dmg'
+            audit = Mock()
+            audit.audit_bundle.return_value = {'minimum_macos': '11.0'}
+            codesign_calls = []
+
+            def command(args, **kwargs):
+                if args[0] == 'codesign':
+                    codesign_calls.append(args)
+                if args[0] == 'lipo':
+                    return 'arm64'
+                if args[0] == 'ditto':
+                    shutil.copytree(args[1], args[2], symlinks=True)
+                if args[:2] == ['hdiutil', 'create']:
+                    staging = Path(args[args.index('-srcfolder') + 1])
+                    self.assertTrue((staging / 'Applications').is_symlink())
+                    Path(args[-1]).write_bytes(b'synthetic image')
+                if args[:2] == ['hdiutil', 'attach']:
+                    mount = Path(args[args.index('-mountpoint') + 1])
+                    shutil.copytree(mount.parent / 'payload', mount, dirs_exist_ok=True, symlinks=True)
+                return ''
+
+            argv = ['package-dmg.py', '--app', str(source), '--output', str(output),
+                    '--deployment-target', '11.0', '--sign']
+            with patch.dict(os.environ, {'APPLE_SIGNING_IDENTITY': 'synthetic-identity'}, clear=True), \
+                    patch.object(sys, 'argv', argv), \
+                    patch.object(disk_package.platform, 'system', return_value='Darwin'), \
+                    patch.object(disk_package, 'run', side_effect=command), \
+                    patch.object(disk_package, 'sign'), \
+                    patch.object(disk_package, 'deployment_module', return_value=audit), \
+                    patch.object(disk_package, 'smoke'):
+                disk_package.main()
+
+            requirement = 'anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
+            verify = [args for args in codesign_calls
+                     if args[:3] == ['codesign', '--verify', '--strict'] and '-R' in ''.join(args)]
+            self.assertTrue(any('-R=' + requirement in args for args in verify))
+            for args in codesign_calls:
+                self.assertNotIn('-R', args, 'requirement must not be a separate argv item')
+
     def test_dmg_create_stops_after_ten_resource_busy_failures(self):
         with patch.object(disk_package, 'run', side_effect=RuntimeError('hdiutil failed (1): Resource busy')) as run, \
                 patch.object(disk_package.time, 'sleep') as sleep, \

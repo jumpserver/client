@@ -136,8 +136,11 @@ def main():
     run(['codesign', '--verify', '--deep', '--strict', str(source)])
     if args.sign:
         # Require a Developer ID app, not an ad-hoc bundle inside a signed image.
-        run(['codesign', '--verify', '--strict', '-R',
-             'anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists', str(source)])
+        # -R must carry the requirement inline (-R=<string>); a separate value is
+        # treated as a requirement *file path* and fails with "invalid req".
+        run(['codesign', '--verify', '--strict',
+             '-R=anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists',
+             str(source)])
     output.parent.mkdir(parents=True, exist_ok=True)
     with workspace() as root:
         staging = root / 'payload'
