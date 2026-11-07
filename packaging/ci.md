@@ -1,6 +1,6 @@
 # 原生安装包 CI
 
-`.github/workflows/build.yml` 在独立的 `client-qt` 仓库根目录运行。只有 `v*` 标签、Pull Request 和手工 `workflow_dispatch` 触发构建；普通分支推送不再自动构建，需要验证时在 Actions 手工运行并选择目标分支。仅上传 GitHub Actions artifacts（保留 14 天），不创建 GitHub Release，不需要 `contents: write`。
+`.github/workflows/build.yml` 在独立的 `client-qt` 仓库根目录运行。只有 `v*` 标签、Pull Request 和手工 `workflow_dispatch` 触发构建；普通分支推送不再自动构建，需要验证时在 Actions 手工运行并选择目标分支。所有构建只上传 GitHub Actions artifacts（保留 14 天）。只有 `v*` 标签触发成功时，额外的 `release` job 汇总各平台 artifacts 创建同名 **draft** GitHub Release 并挂载安装包；PR 和手工运行不创建 Release。workflow 默认 `contents: read`，仅 `release` job 提升到 `contents: write`。
 
 ## 构建矩阵
 
@@ -54,6 +54,8 @@ macOS/Windows 编译 Qt Base、Qt SVG、部署工具，关闭不用的 OpenGL、
 流水线通过 `BUILD_TESTING=OFF` 只构建、打包和校验安装包，不编译测试程序，也不运行 CTest、Go 单元测试或离线打包回归测试（`tests/` 保留供本地验证）。Linux 在第二个干净容器中安装生成的包，检查依赖、MIME 注册、有效载荷及 `--smoke-test`。Windows 在一次性 GitHub-hosted runner 上验证 EXE/MSI 安装、安装后启动、正常卸载，以及其他应用接管 `jms` 后卸载仍保留该处理器。macOS 打包脚本检查 Mach-O 依赖和签名；签名任务另外执行 Apple 公证及 stapler 验证。
 
 GitHub macOS hosted runner 偶发 `hdiutil create - Resource busy` 时，DMG 创建最多尝试 10 次（失败后间隔 5 秒，最多 9 次重试），仅清理本次未完成的目标文件；之后仍执行镜像校验、挂载检查、依赖检查及可用的启动 smoke test，不降低安装包的验证范围。
+
+标签构建的 `release` job 依赖全部构建 job 成功；任一平台构建失败则整个 release job 跳过，不会产出残缺 Release。它先校验 dmg/exe/msi/deb/rpm 五类安装包齐全，再用 `softprops/action-gh-release` 创建 **draft** Release（生成 release notes、不设为 latest），安装包和各 `.manifest.json` 校验文件作为 assets 上传。draft 不会对外可见，需要维护者在 Releases 页面人工确认后手动 publish；重复运行同一标签会复用并覆盖同名 assets。
 
 本地已通过 actionlint、36 项打包回归，完成官方 Qt 5.15.19 的 arm64/x86_64 源码构建及两种应用构建。独立 Qt 5 与 Qt 6 的 CTest 各 5/5 通过。两个打包阶段强制逐个 Mach-O 检查架构、依赖和 minOS，并写入目标系统版本，超标立即失败。原生 ARM DMG 完成挂载内 Cocoa smoke；Intel 在无 Rosetta 的 ARM 主机交叉构建，显式记录未执行启动检查。复现说明见 [macOS 兼容构建](macos-compat.md)。
 
