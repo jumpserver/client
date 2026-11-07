@@ -44,6 +44,28 @@ class WindowsPackagingTests(unittest.TestCase):
             with self.subTest(version=version), self.assertRaises(RuntimeError):
                 PACKAGE.package_version({'CLIENT_VERSION': version})
 
+    def test_windeployqt_options_skip_angle_when_qt5_lacks_angle_libraries(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            qt_bin = Path(temporary)
+            deployqt = qt_bin / 'windeployqt.exe'
+            (qt_bin / 'libGLESv2.dll').write_bytes(b'synthetic ANGLE library')
+            self.assertEqual(PACKAGE.windeployqt_options(deployqt, 5),
+                             ['--release', '--compiler-runtime', '--no-angle', '--no-opengl-sw'])
+            (qt_bin / 'libEGL.dll').write_bytes(b'synthetic ANGLE library')
+            self.assertEqual(PACKAGE.windeployqt_options(deployqt, 5), ['--release', '--compiler-runtime'])
+            (qt_bin / 'libGLESv2.dll').unlink()
+            (qt_bin / 'libEGL.dll').unlink()
+            (qt_bin / 'QtANGLE.dll').write_bytes(b'synthetic combined ANGLE library')
+            self.assertEqual(PACKAGE.windeployqt_options(deployqt, 5), ['--release', '--compiler-runtime'])
+            (qt_bin / 'QtANGLE.dll').unlink()
+            self.assertEqual(PACKAGE.windeployqt_options(deployqt, 5),
+                             ['--release', '--compiler-runtime', '--no-angle', '--no-opengl-sw'])
+            self.assertEqual(PACKAGE.windeployqt_options(deployqt, 6), ['--release', '--compiler-runtime'])
+            self.assertEqual(PACKAGE.deployment_major({'CLIENT_QT_MAJOR': '6'}), 6)
+            self.assertEqual(PACKAGE.deployment_major({}), 5)
+            with self.assertRaisesRegex(RuntimeError, 'Unsupported'):
+                PACKAGE.deployment_major({'CLIENT_QT_MAJOR': '7'})
+
     def test_pe_architecture_checks_reject_missing_and_non_windows(self):
         with tempfile.TemporaryDirectory() as temporary:
             binary = Path(temporary) / 'client.exe'
@@ -157,12 +179,17 @@ class WindowsPackagingTests(unittest.TestCase):
                 synthetic_pe(build / 'bin' / 'windows' / name, PACKAGE.MACHINES[arch])
             (build / 'bin' / 'config.json').write_text('{}')
             output = root / 'dist'
+            qt_bin = root / 'qt-bin'
+            qt_bin.mkdir()
+            fake_deployqt = qt_bin / 'windeployqt.exe'
             commands = []
 
             def fake_run(command, label, env=None, quiet=False):
                 commands.append(label)
                 if label == 'Deploying matching Qt runtime and plugins':
-                    stage = Path(command[4])
+                    self.assertIn('--no-angle', command)
+                    self.assertIn('--no-opengl-sw', command)
+                    stage = Path(command[command.index('--dir') + 1])
                     for name in ('Qt5Core.dll', 'Qt5Gui.dll', 'Qt5Widgets.dll', 'Qt5Network.dll',
                                  'Qt5Svg.dll', 'platforms/qwindows.dll'):
                         synthetic_pe(stage / name, PACKAGE.MACHINES['amd64'])
@@ -174,7 +201,8 @@ class WindowsPackagingTests(unittest.TestCase):
                     self.assertNotIn('QT_PLUGIN_PATH', env)
 
             argv = ['package-windows.py', '--build', str(build), '--output', str(output),
-                    '--format', 'exe', '--skip-build', '--native-tls', '--sign']
+                    '--format', 'exe', '--skip-build', '--native-tls', '--sign',
+                    '--windeployqt', str(fake_deployqt)]
             with mock.patch.object(PACKAGE.sys, 'platform', 'win32'), mock.patch.object(sys, 'argv', argv), \
                     mock.patch.dict(os.environ, {'SystemRoot': str(root / 'windows')}, clear=True), \
                     mock.patch.object(PACKAGE, 'tool', side_effect=str), mock.patch.object(PACKAGE, 'run', side_effect=fake_run), \
@@ -189,6 +217,46 @@ class WindowsPackagingTests(unittest.TestCase):
             self.assertEqual(manifest['sha256'], PACKAGE.hashlib.sha256(artifact.read_bytes()).hexdigest())
             self.assertIn('Skipping Windows signing', log.getvalue())
             self.assertFalse(any(label.startswith('Signing') for label in commands))
+
+    def test_qt6_deployment_omits_qt5_angle_options(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            build = root / 'build'
+            build.mkdir()
+            (build / 'CMakeCache.txt').write_text('CLIENT_VERSION:STRING=4.1.2\nCLIENT_QT_MAJOR:STRING=6\nCMAKE_CXX_COMPILER:FILEPATH=fake-g++\n')
+            synthetic_pe(build / 'client.exe', PACKAGE.MACHINES['amd64'])
+            for name, arch in (('JumpServerClient.exe', 'amd64'), ('putty.exe', '386'),
+                               ('AutoItX3.dll', '386'), ('AutoItX3_x64.dll', 'amd64')):
+                synthetic_pe(build / 'bin' / 'windows' / name, PACKAGE.MACHINES[arch])
+            (build / 'bin' / 'config.json').write_text('{}')
+            output = root / 'dist'
+            qt_bin = root / 'qt-bin'
+            qt_bin.mkdir()
+            fake_deployqt = qt_bin / 'windeployqt.exe'
+            deploy_command = []
+
+            def fake_run(command, label, env=None, quiet=False):
+                if label == 'Deploying matching Qt runtime and plugins':
+                    deploy_command.extend(command)
+                    stage = Path(command[command.index('--dir') + 1])
+                    for name in ('Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'Qt6Network.dll',
+                                 'Qt6Svg.dll', 'platforms/qwindows.dll'):
+                        synthetic_pe(stage / name, PACKAGE.MACHINES['amd64'])
+                elif label == 'Building NSIS EXE installer':
+                    target = next(str(value)[9:] for value in command if str(value).startswith('/DOUTPUT='))
+                    Path(target).write_text('SYNTHETIC INSTALLER - NOT FOR DISTRIBUTION')
+
+            argv = ['package-windows.py', '--build', str(build), '--output', str(output),
+                    '--format', 'exe', '--skip-build', '--native-tls',
+                    '--windeployqt', str(fake_deployqt)]
+            with mock.patch.object(PACKAGE.sys, 'platform', 'win32'), mock.patch.object(sys, 'argv', argv), \
+                    mock.patch.dict(os.environ, {'SystemRoot': str(root / 'windows')}, clear=True), \
+                    mock.patch.object(PACKAGE, 'tool', side_effect=str), \
+                    mock.patch.object(PACKAGE, 'run', side_effect=fake_run), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                PACKAGE.main()
+            self.assertNotIn('--no-angle', deploy_command)
+            self.assertNotIn('--no-opengl-sw', deploy_command)
 
     def test_non_windows_packaging_is_rejected(self):
         with mock.patch.object(PACKAGE.sys, 'platform', 'darwin'), mock.patch.object(sys, 'argv', ['package-windows.py', '--build', 'not-a-real-build']), contextlib.redirect_stderr(io.StringIO()):

@@ -50,6 +50,22 @@ def cache_values(build):
     return values
 
 
+def deployment_major(cache):
+    value = cache.get('CLIENT_QT_MAJOR', '5')
+    if value not in ('5', '6'):
+        raise RuntimeError(f'Unsupported CLIENT_QT_MAJOR in CMakeCache: {value}')
+    return int(value)
+
+
+def windeployqt_options(deployqt, qt_major):
+    options = ['--release', '--compiler-runtime']
+    qt_bin = Path(deployqt).parent
+    angle_library = ((qt_bin / 'libGLESv2.dll').is_file() and (qt_bin / 'libEGL.dll').is_file()) or (qt_bin / 'QtANGLE.dll').is_file()
+    if qt_major == 5 and not angle_library:
+        options += ['--no-angle', '--no-opengl-sw']
+    return options
+
+
 def package_version(cache):
     version = cache.get('CLIENT_VERSION') or cache.get('CMAKE_PROJECT_VERSION')
     if not version or not re.fullmatch(r'\d+\.\d+\.\d+', version):
@@ -299,7 +315,8 @@ def main():
             alternate.unlink()
         shutil.copy2(ROOT / 'LICENSE', stage / 'LICENSE.txt')
         deployqt = tool(args.windeployqt)
-        run([deployqt, '--release', '--compiler-runtime', '--dir', stage, stage / 'client.exe'], 'Deploying matching Qt runtime and plugins')
+        deploy_options = windeployqt_options(deployqt, deployment_major(cache))
+        run([deployqt, *deploy_options, '--dir', stage, stage / 'client.exe'], 'Deploying matching Qt runtime and plugins')
         compiler = tool(args.compiler or cache.get('CMAKE_CXX_COMPILER', 'cl'))
         is_msvc = Path(compiler).name.lower() in ('cl', 'cl.exe', 'clang-cl', 'clang-cl.exe')
         if is_msvc:

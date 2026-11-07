@@ -12,6 +12,7 @@ import plistlib
 import shutil
 import sys
 import tempfile
+import time
 from macos_common import run, sign, resolve_signing, smoke
 
 
@@ -48,6 +49,22 @@ def resolve_notarization(requested, signed):
         print('Notarization skipped: ' + reason)
         return False
     return True
+
+
+def create_image(staging, volume_name, output):
+    command = ['hdiutil', 'create', '-ov', '-volname', volume_name, '-srcfolder', str(staging),
+               '-fs', 'HFS+', '-format', 'UDZO', '-imagekey', 'zlib-level=9', str(output)]
+    for attempt in range(10):
+        try:
+            return run(command, timeout=600)
+        except RuntimeError as error:
+            if 'Resource busy' not in str(error):
+                raise
+            output.unlink(missing_ok=True)
+            if attempt == 9:
+                raise
+            print('Temporary disk image resource conflict; retrying hdiutil create.')
+            time.sleep(5)
 
 
 def detach_mount(mount):
@@ -133,8 +150,7 @@ def main():
             'Launch it from Applications to sign in. Existing user settings are preserved.\n\n'
             'Architecture: {}\nMinimum macOS for this build: {}\n'.format(
                 info.get('CFBundleShortVersionString', ''), architecture, report['minimum_macos']))
-        run(['hdiutil', 'create', '-volname', args.volume_name, '-srcfolder', str(staging),
-             '-fs', 'HFS+', '-format', 'UDZO', '-imagekey', 'zlib-level=9', str(output)], timeout=600)
+        create_image(staging, args.volume_name, output)
         if args.sign:
             sign(output, release=True, runtime=False)
             run(['codesign', '--verify', '--strict', str(output)])

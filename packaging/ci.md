@@ -51,6 +51,8 @@ macOS/Windows 编译 Qt Base、Qt SVG、部署工具，关闭不用的 OpenGL、
 
 流水线通过 `BUILD_TESTING=OFF` 只构建、打包和校验安装包，不编译测试程序，也不运行 CTest、Go 单元测试或离线打包回归测试（`tests/` 保留供本地验证）。Linux 在第二个干净容器中安装生成的包，检查依赖、MIME 注册、有效载荷及 `--smoke-test`。Windows 在一次性 GitHub-hosted runner 上验证 EXE/MSI 安装、安装后启动、正常卸载，以及其他应用接管 `jms` 后卸载仍保留该处理器。macOS 打包脚本检查 Mach-O 依赖和签名；签名任务另外执行 Apple 公证及 stapler 验证。
 
+GitHub macOS hosted runner 偶发 `hdiutil create - Resource busy` 时，DMG 创建最多尝试 10 次（失败后间隔 5 秒，最多 9 次重试），仅清理本次未完成的目标文件；之后仍执行镜像校验、挂载检查、依赖检查及可用的启动 smoke test，不降低安装包的验证范围。
+
 本地已通过 actionlint、36 项打包回归，完成官方 Qt 5.15.19 的 arm64/x86_64 源码构建及两种应用构建。独立 Qt 5 与 Qt 6 的 CTest 各 5/5 通过。两个打包阶段强制逐个 Mach-O 检查架构、依赖和 minOS，并写入目标系统版本，超标立即失败。原生 ARM DMG 完成挂载内 Cocoa smoke；Intel 在无 Rosetta 的 ARM 主机交叉构建，显式记录未执行启动检查。复现说明见 [macOS 兼容构建](macos-compat.md)。
 
 此次本机使用 Apple clang 21/Command Line Tools；源码构建产生的旧部署目标警告不代表旧系统已实测。项目尚未发布到 GitHub，本轮没有运行 GitHub Actions；固定 Xcode/MSVC 的 CI 构建、Windows 安装验证、真实签名/公证和 macOS 10.15/11 实机仍待验收。当前兼容包位于 `dist/current/`；历史开发包已清理，最新结果见 [验证记录](../docs/validation.md)。

@@ -1,6 +1,8 @@
 """Offline signing/packaging regression checks using synthetic credentials only."""
 import base64
+import contextlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -10,7 +12,7 @@ import shutil
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
@@ -92,6 +94,47 @@ class PackagingTests(unittest.TestCase):
             manifest = json.loads(output.with_suffix('.manifest.json').read_text())
             self.assertEqual(manifest['file'], 'OSMClient-4.1.2-macos-arm64.dmg')
             self.assertFalse(manifest['signed'])
+
+    def test_dmg_create_retries_transient_resource_busy(self):
+        output = Path('/synthetic/OSMClient.dmg')
+        created = []
+
+        def busy_then_success(args, **kwargs):
+            if args[:2] == ['hdiutil', 'create']:
+                created.append(args)
+                if len(created) < 3:
+                    raise RuntimeError('hdiutil failed (1): hdiutil: create failed - Resource busy')
+            return ''
+
+        with patch.object(disk_package, 'run', side_effect=busy_then_success) as run, \
+                patch.object(disk_package.time, 'sleep') as sleep, \
+                patch.object(disk_package.Path, 'unlink', autospec=True) as unlink:
+            disk_package.create_image(Path('/synthetic/payload'), 'OSMClient', output)
+        self.assertEqual(len(created), 3)
+        self.assertIn('-ov', created[0])
+        self.assertEqual(sleep.call_args_list, [call(5), call(5)])
+        self.assertEqual(unlink.call_count, 2)
+
+    def test_dmg_create_stops_after_ten_resource_busy_failures(self):
+        with patch.object(disk_package, 'run', side_effect=RuntimeError('hdiutil failed (1): Resource busy')) as run, \
+                patch.object(disk_package.time, 'sleep') as sleep, \
+                patch.object(disk_package.Path, 'unlink', autospec=True) as unlink, \
+                contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(RuntimeError, 'Resource busy'):
+                disk_package.create_image(Path('/synthetic/payload'), 'OSMClient', Path('/synthetic/OSMClient.dmg'))
+        self.assertEqual(run.call_count, 10)
+        self.assertEqual(sleep.call_count, 9)
+        self.assertEqual(unlink.call_count, 10)
+
+    def test_dmg_create_does_not_retry_other_failures(self):
+        with patch.object(disk_package, 'run', side_effect=RuntimeError('permission denied')) as run, \
+                patch.object(disk_package.time, 'sleep') as sleep, \
+                patch.object(disk_package.Path, 'unlink', autospec=True) as unlink:
+            with self.assertRaisesRegex(RuntimeError, 'permission denied'):
+                disk_package.create_image(Path('/synthetic/payload'), 'OSMClient', Path('/synthetic/OSMClient.dmg'))
+        self.assertEqual(run.call_count, 1)
+        sleep.assert_not_called()
+        unlink.assert_not_called()
 
     def test_keychain_search_failure_still_attempts_private_key_removal(self):
         with tempfile.TemporaryDirectory(prefix='client-qt-signing-') as temporary:
