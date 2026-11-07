@@ -10,6 +10,7 @@ def main():
     parser.add_argument('--upstream', type=int, required=True)
     parser.add_argument('--certificate', required=True)
     parser.add_argument('--key', required=True)
+    parser.add_argument('--port-file', required=True)
     args = parser.parse_args()
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -39,7 +40,8 @@ def main():
     context.load_cert_chain(args.certificate, args.key)
     with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
         server.socket = context.wrap_socket(server.socket, server_side=True)
-        print(server.server_port, flush=True)
+        with open(args.port_file, 'w', encoding='ascii') as port_file:
+            port_file.write(str(server.server_port))
         server.serve_forever()
 
 

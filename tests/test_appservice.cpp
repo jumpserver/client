@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QPointer>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QTemporaryDir>
 #include <QFile>
 #include <QNetworkReply>
@@ -18,8 +19,14 @@
 #include <QSslKey>
 #include <QSslSocket>
 #include <QTcpSocket>
+#include <QThread>
 #include <QtTest>
 #include <memory>
+#ifdef Q_OS_UNIX
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 // Match application/x-www-form-urlencoded decoding used by the server, including '+'.
 static QMap<QString, QString> decodeForm(QByteArray bytes)
@@ -54,6 +61,7 @@ public:
     QVector<HttpRequest> requests;
     std::function<void(const HttpRequest &, QTcpSocket *)> handler;
     QTemporaryDir tlsFiles;
+    qint64 tlsPid = 0;
     QProcess tlsProxy;
     quint16 tlsPort = 0;
     QString startError;
@@ -102,55 +110,121 @@ public:
         }
     }
     ~HttpMock() override {
+#ifdef Q_OS_UNIX
+        if (tlsPid > 0) {
+            kill(static_cast<pid_t>(tlsPid), SIGTERM);
+            waitpid(static_cast<pid_t>(tlsPid), nullptr, 0);
+        }
+#else
         if (tlsProxy.state() != QProcess::NotRunning) {
             tlsProxy.terminate();
-            if (!tlsProxy.waitForFinished(3000)) {
-                tlsProxy.kill();
-                tlsProxy.waitForFinished(3000);
-            }
+            if (!tlsProxy.waitForFinished(3000)) tlsProxy.kill();
         }
+#endif
     }
     QString url() const
     {
         return QStringLiteral("%1://127.0.0.1:%2").arg(server.useTls ? "https" : "http").arg(server.useTls ? tlsPort : server.serverPort());
     }
-    // The fixture is a separate interpreter, so a cold or loaded runner can need well
-    // over the 5 seconds this used to allow. Report why it stayed silent instead of
-    // aborting the whole test binary.
+    // A separate interpreter can take well over the 5 seconds this used to allow.
+    // Report why it stayed silent instead of aborting the whole test binary.
     void startTlsProxy()
     {
-        static constexpr qint64 StartupLimitMs = 15000;
-        // Unbuffered stdout plus an isolated interpreter keeps the cold start on a
-        // shared runner from dominating the wait for the reported port.
-        tlsProxy.start(QString::fromUtf8(TEST_PYTHON_EXECUTABLE),
-            {QStringLiteral("-I"), QStringLiteral("-S"), QStringLiteral("-B"), QStringLiteral("-u"),
-             QString::fromUtf8(TEST_TLS_PROXY), "--upstream", QString::number(server.serverPort()),
-             "--certificate", tlsFiles.filePath("certificate.pem"), "--key", tlsFiles.filePath("key.pem")});
+#ifdef Q_OS_UNIX
+        startTlsProxyUnix();
+#else
+        startTlsProxyProcess();
+#endif
+    }
+#ifdef Q_OS_UNIX
+    void startTlsProxyUnix()
+    {
+        static constexpr int StartupLimitMs = 30000;
+        const QString portPath = tlsFiles.filePath("port");
+        QFile::remove(portPath);
+        const pid_t pid = fork();
+        if (pid < 0) {
+            startError = QStringLiteral("Cannot fork local TLS fixture (%1)").arg(qt_error_string());
+            return;
+        }
+        if (pid == 0) {
+            const QByteArray program = QByteArray(TEST_PYTHON_EXECUTABLE);
+            const QByteArray script = QByteArray(TEST_TLS_PROXY);
+            const QByteArray upstream = QByteArray::number(server.serverPort());
+            const QByteArray certificate = tlsFiles.filePath("certificate.pem").toUtf8();
+            const QByteArray key = tlsFiles.filePath("key.pem").toUtf8();
+            const QByteArray port = portPath.toUtf8();
+            char *arguments[] = {const_cast<char *>(program.constData()),
+                                 const_cast<char *>("-I"), const_cast<char *>("-S"),
+                                 const_cast<char *>("-B"),
+                                 const_cast<char *>(script.constData()),
+                                 const_cast<char *>("--upstream"), const_cast<char *>(upstream.constData()),
+                                 const_cast<char *>("--certificate"), const_cast<char *>(certificate.constData()),
+                                 const_cast<char *>("--key"), const_cast<char *>(key.constData()),
+                                 const_cast<char *>("--port-file"), const_cast<char *>(port.constData()),
+                                 nullptr};
+            unsetenv("PYTHONEXECUTABLE");
+            unsetenv("PYTHONHOME");
+            unsetenv("PYTHONPATH");
+            setenv("PYTHONDONTWRITEBYTECODE", "1", 1);
+            execv(program.constData(), arguments);
+            _exit(127);
+        }
+        tlsPid = pid;
         QElapsedTimer waited;
         waited.start();
-        while (tlsPort == 0 && waited.elapsed() < StartupLimitMs) {
-            if (!tlsProxy.waitForStarted(200)) {
-                if (tlsProxy.state() == QProcess::NotRunning) break;
-                continue;
+        while (waited.elapsed() < StartupLimitMs) {
+            QFile portFile(portPath);
+            if (portFile.open(QIODevice::ReadOnly)) {
+                tlsPort = portFile.readAll().trimmed().toUShort();
+                if (tlsPort) return;
             }
-            if (tlsProxy.waitForReadyRead(200)) tlsPort = tlsProxy.readLine().trimmed().toUShort();
+            int status = 0;
+            const pid_t result = waitpid(pid, &status, WNOHANG);
+            if (result == pid) {
+                tlsPid = 0;
+                startError = QStringLiteral("Local TLS fixture exited before reporting its port (code=%1, signal=%2)")
+                    .arg(WIFEXITED(status) ? WEXITSTATUS(status) : -1)
+                    .arg(WIFSIGNALED(status) ? WTERMSIG(status) : 0);
+                return;
+            }
+            QThread::msleep(50);
         }
-        if (tlsPort == 0) {
-            QString detail = QStringLiteral("executable=%1").arg(QString::fromUtf8(TEST_PYTHON_EXECUTABLE));
-            if (tlsProxy.error() == QProcess::FailedToStart)
-                detail += QStringLiteral(", startError=%1").arg(tlsProxy.errorString());
-            else if (tlsProxy.state() == QProcess::NotRunning)
-                detail += QStringLiteral(", exited(code=%1, status=%2)").arg(tlsProxy.exitCode())
-                              .arg(tlsProxy.exitStatus() == QProcess::CrashExit ? QStringLiteral("crash") : QStringLiteral("normal"));
-            else
-                detail += QStringLiteral(", still starting");
-            const QByteArray stderrText = tlsProxy.readAllStandardError();
-            if (!stderrText.isEmpty())
-                detail += QStringLiteral(", stderr=%1").arg(QString::fromUtf8(stderrText).simplified());
-            startError = QStringLiteral("Local TLS fixture did not report its port within %1 ms (%2)")
-                .arg(StartupLimitMs).arg(detail);
-        }
+        startError = QStringLiteral("Local TLS fixture did not report its port within %1 ms").arg(StartupLimitMs);
     }
+#else
+    void startTlsProxyProcess()
+    {
+        static constexpr int StartupLimitMs = 30000;
+        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        environment.remove(QStringLiteral("PYTHONEXECUTABLE"));
+        environment.remove(QStringLiteral("PYTHONHOME"));
+        environment.remove(QStringLiteral("PYTHONPATH"));
+        environment.insert(QStringLiteral("PYTHONDONTWRITEBYTECODE"), QStringLiteral("1"));
+        tlsProxy.setProcessEnvironment(environment);
+        const QString portPath = tlsFiles.filePath("port");
+        QFile::remove(portPath);
+        tlsProxy.start(QString::fromUtf8(TEST_PYTHON_EXECUTABLE),
+            {QStringLiteral("-I"), QStringLiteral("-S"), QStringLiteral("-B"),
+             QString::fromUtf8(TEST_TLS_PROXY), "--upstream", QString::number(server.serverPort()),
+             "--certificate", tlsFiles.filePath("certificate.pem"), "--key", tlsFiles.filePath("key.pem"),
+             "--port-file", portPath});
+        QElapsedTimer waited;
+        waited.start();
+        while (waited.elapsed() < StartupLimitMs) {
+            QFile portFile(portPath);
+            if (portFile.open(QIODevice::ReadOnly)) {
+                tlsPort = portFile.readAll().trimmed().toUShort();
+                if (tlsPort) return;
+            }
+            QThread::msleep(50);
+        }
+        startError = QStringLiteral("Local TLS fixture did not report its port within %1 ms "
+                                    "(process=%2, startError=%3, stderr=%4)")
+            .arg(StartupLimitMs).arg(static_cast<int>(tlsProxy.state())).arg(tlsProxy.errorString())
+            .arg(QString::fromUtf8(tlsProxy.readAllStandardError()).simplified());
+    }
+#endif
     static void reply(QTcpSocket *socket, QJsonValue value, int status = 200)
     {
         const QByteArray body = value.isArray() ? QJsonDocument(value.toArray()).toJson(QJsonDocument::Compact)
@@ -225,7 +299,7 @@ private slots:
         QSignalSpy metadata(&service, &AppService::metadataReady);
         int versions = 0, tokens = 0, authenticatedRequests = 0, revocations = 0;
         mock.handler = [&](const HttpRequest &request, QTcpSocket *socket) {
-            QCOMPARE(mock.tlsProxy.state(), QProcess::Running);
+                QVERIFY(mock.tlsPort != 0);
             const auto path = request.url.path();
             if (path.endsWith("/versions/")) {
                 ++versions;

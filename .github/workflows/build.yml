@@ -228,10 +228,11 @@ jobs:
             if (-not (Test-Path $exe)) { continue }
             # A crashed test binary loses its buffered stdout, so rerun it directly
             # with per-function detail and report the process exit code.
-            Write-Host "--- $name: verbose rerun after ctest failure ---"
-            & ".\$exe" -v2 2>&1 | ForEach-Object { Write-Host "$_" }
+            Write-Host "--- ${name}: verbose rerun after ctest failure ---"
+            & ".\$exe" -v2 2>&1 | ForEach-Object { Write-Host $_ }
             $code = $LASTEXITCODE
-            Write-Host "--- $name exit code $code (0x$($code.ToString('X8'))) ---"
+            $hex = if ($null -ne $code) { [Convert]::ToString([uint32][int64]$code, 16).ToUpper().PadLeft(8, '0') } else { 'n/a' }
+            Write-Host ("--- {0} exit code {1} (0x{2}) ---" -f $name, $code, $hex)
           }
       - name: Package EXE and MSI with app-local runtime
         shell: pwsh
