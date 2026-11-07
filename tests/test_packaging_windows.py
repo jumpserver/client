@@ -277,6 +277,25 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertNotIn('DELETE FROM', source)
         self.assertNotIn('MsiDatabaseCommit', source)
 
+    def test_msi_component_scopes_satisfy_ice_validation(self):
+        ns = {'w': PACKAGE.WIX_NS}
+        product = ET.parse(ROOT / 'packaging' / 'windows.wxs').find('w:Product', ns)
+        directories = {directory.attrib['Id']: directory for directory in product.findall('.//w:Directory', ns)}
+        # ICE38/ICE43/ICE57: shortcut components are authored in user-profile folders, so MSI
+        # requires per-user key paths even though the package installs machine-wide links.
+        for directory_id in ('ProgramMenuFolder', 'DesktopFolder'):
+            key_paths = [value for value in directories[directory_id].findall('.//w:RegistryValue', ns)
+                         if value.attrib.get('KeyPath') == 'yes']
+            self.assertEqual(len(key_paths), 1)
+            self.assertEqual(key_paths[0].attrib['Root'], 'HKCU')
+        # ICE80: the protocol guard keeps the 32-bit registry view, so it must not be anchored in
+        # the 64-bit installation directory. It installs no files, so its anchor stays inert.
+        guard = product.find('.//w:Component[@Id="JmsRegistration"]', ns)
+        self.assertEqual(guard.attrib['Win64'], 'no')
+        self.assertEqual(guard.findall('w:File', ns), [])
+        self.assertIn(guard, list(directories['TARGETDIR']))
+        self.assertEqual(directories['INSTALLFOLDER'].findall('w:Component', ns), [])
+
     def test_product_rename_preserves_upgrade_identity_and_removes_old_product_first(self):
         ns = {'w': PACKAGE.WIX_NS}
         product = ET.parse(ROOT / 'packaging' / 'windows.wxs').find('w:Product', ns)

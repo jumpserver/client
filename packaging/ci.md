@@ -1,6 +1,6 @@
 # 原生安装包 CI
 
-`.github/workflows/build.yml` 在独立的 `client-qt` 仓库根目录运行。推送 `main`、`master`、`osm`、`osm-qt`、`v*` 标签、Pull Request 或手工 `workflow_dispatch` 均可触发。仅上传 GitHub Actions artifacts（保留 14 天），不创建 GitHub Release，不需要 `contents: write`。
+`.github/workflows/build.yml` 在独立的 `client-qt` 仓库根目录运行。只有 `v*` 标签、Pull Request 和手工 `workflow_dispatch` 触发构建；普通分支推送不再自动构建，需要验证时在 Actions 手工运行并选择目标分支。仅上传 GitHub Actions artifacts（保留 14 天），不创建 GitHub Release，不需要 `contents: write`。
 
 ## 构建矩阵
 
@@ -23,7 +23,7 @@ Linux 构建在 Ubuntu 24.04 runner 的发行版容器内完成，镜像固定�
 
 | 触发方式 | macOS | Windows |
 | --- | --- | --- |
-| 普通分支 / PR | ad-hoc 签名，不公证，无需证书 | unsigned，无需证书 |
+| PR（非标签） | ad-hoc 签名，不公证，无需证书 | unsigned，无需证书 |
 | `vX.Y.Z` 标签 | 请求 Developer ID 签名及公证；缺凭据时跳过对应步骤 | 默认 unsigned；仓库变量 `SIGN_WINDOWS=true` 时请求签名 |
 | 手工运行 | `sign_macos` 请求签名及公证；标签始终请求 | `sign_windows` 请求 Authenticode；标签也遵循仓库变量 |
 

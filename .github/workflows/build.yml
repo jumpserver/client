@@ -2,7 +2,6 @@ name: Native packages
 
 on:
   push:
-    branches: [main, master, osm, osm-qt]
     tags: ['v*']
   pull_request:
   workflow_dispatch:

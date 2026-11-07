@@ -21,19 +21,27 @@
     <Condition Message="Uninstall the existing EXE package before installing the MSI package.">Installed OR NOT NSISINSTALL</Condition>
     <Condition Message="This installer requires Windows 7 or later; the packaged Qt/CRT/Go build may require a newer system.">Installed OR VersionNT &gt;= 601</Condition>
     <Directory Id="TARGETDIR" Name="SourceDir">
+      <!-- Registry-only components install no files, so their directory is only the MSI
+           scope anchor. Keep them out of the 64-bit INSTALLFOLDER: JmsRegistration stays a
+           32-bit component on purpose, because its HKLM values and the temporary jms rows it
+           owns have to share the 32-bit registry view with the NSIS package, and ICE80
+           rejects a 32-bit component placed in a 64-bit directory. -->
+      <Component Id="JmsRegistration" Guid="5B57B3C9-79BA-4710-93FB-074A79B1DA74" Win64="no">
+        <RegistryValue Id="MsiInstallMarker" Root="HKLM" Key="Software\FIT2CLOUD\OSMClient"
+                       Name="WindowsInstaller" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+      </Component>
       <Directory Id="$(var.ProgramFilesDirectory)">
-          <Directory Id="INSTALLFOLDER" Name="OSMClient">
-            <Component Id="JmsRegistration" Guid="5B57B3C9-79BA-4710-93FB-074A79B1DA74" Win64="no">
-              <RegistryValue Id="MsiInstallMarker" Root="HKLM" Key="Software\FIT2CLOUD\OSMClient"
-                             Name="WindowsInstaller" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
-            </Component>
-          </Directory>
+        <Directory Id="INSTALLFOLDER" Name="OSMClient" />
       </Directory>
       <Directory Id="ProgramMenuFolder">
+        <!-- ICE38/ICE43/ICE57: these components are authored in user-profile folders, so MSI
+             requires a per-user key path. InstallScope="perMachine" still writes the links to
+             the All Users start menu and public desktop; no RemoveFolder is authored because
+             the links live in the standard folders themselves. -->
         <Component Id="AppShortcut" Guid="2C898C38-93F4-41AC-A54A-A2C8D4AAD267" Win64="no">
           <Shortcut Id="StartMenuShortcut" Name="OSMClient" Target="[#MainExecutable]"
                     WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
-          <RegistryValue Root="HKLM" Key="Software\FIT2CLOUD\OSMClient" Name="Shortcut"
+          <RegistryValue Root="HKCU" Key="Software\FIT2CLOUD\OSMClient" Name="Shortcut"
                          Type="integer" Value="1" KeyPath="yes" />
         </Component>
       </Directory>
@@ -41,7 +49,7 @@
         <Component Id="DesktopShortcut" Guid="1669B23A-E729-41C7-801F-B49B8100559C" Win64="no">
           <Shortcut Id="DesktopShortcutLink" Name="OSMClient" Target="[#MainExecutable]"
                     WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
-          <RegistryValue Root="HKLM" Key="Software\FIT2CLOUD\OSMClient" Name="DesktopShortcut"
+          <RegistryValue Root="HKCU" Key="Software\FIT2CLOUD\OSMClient" Name="DesktopShortcut"
                          Type="integer" Value="1" KeyPath="yes" />
         </Component>
       </Directory>

@@ -50,6 +50,11 @@ Qt 的部署工具不负责所有第三方依赖，参见 [Qt 5.15 Windows deplo
 
 NSIS 仅删除生成清单中的文件，不递归清空用户选择的目录。NSIS 卸载前比较当前 `jms` command；MSI 通过 `windows-jms-ca.cpp` 在 `RemoveRegistryValues` 前检查同一条件。MSI 不持久化共享 `jms` 的 Registry 行：安装/修复时临时添加四行，由标准动作写入；卸载时仅在仍属本程序的情况下添加临时行供标准动作移除，其他客户端已接管则不添加。这样仍由 MSI 标准动作管理回滚，CA 不改持久表行、不直接修改注册表。依据 [Microsoft 当前安装会话限制](https://learn.microsoft.com/en-us/windows/win32/msi/accessing-the-current-installer-session-from-inside-a-custom-action) 和 [RemoveRegistryValues action](https://learn.microsoft.com/en-us/windows/win32/msi/removeregistryvalues-action)。卸载不会自动恢复安装前的旧协议处理器。
 
+MSI 的 ICE 一致性校验限定了 authoring 位置，只用结构调整满足，不用 `light -sice:` 抑制：
+
+- 开始菜单和公共桌面快捷方式组件位于用户配置文件目录，MSI 要求 key path 为 `HKCU`（ICE38/ICE43/ICE57 按 authoring 目录判断，与 `ALLUSERS`、`InstallScope` 无关）；`InstallScope="perMachine"` 时 `ALLUSERS=1` 仍把快捷方式写入 All Users 开始菜单和公共桌面，标准目录本身不会被删除，因此不写 `RemoveFolder`。参考 [WiX 开始菜单快捷方式](https://wixtoolset.org/docs/v3/howtos/files_and_registry/create_start_menu_shortcut/) 与 [Installation Context](https://learn.microsoft.com/en-us/windows/win32/msi/installation-context)。
+- 不装文件的 `JmsRegistration` 挂在 `TARGETDIR`，不再挂在 64 位 `INSTALLFOLDER` 下：ICE80 拒绝 64 位目录中的 32 位组件，而它必须保持 32 位组件，才能让安装标记和临时 `jms` 行与 NSIS 包共用 32 位注册表视图（`windows-jms-ca.cpp` 用 `KEY_WOW64_32KEY` 读回，`windows.nsi` 用 `SetRegView 32` 判断）。标记值仍取 `[INSTALLFOLDER]`，与组件目录无关。
+
 **旧系统兼容由 Qt、C++/CRT、Go、OpenSSL 的实际构建工具链共同决定**，EXE/MSI 扩展名和安装器的 Windows 7 下限不能降低程序本身的系统要求。Windows 7/8 的 Go helper 需要相应旧工具链（Go 1.20 为最后支持线），Qt 6 与现代 CRT/SDK 应单独建立较新系统包；不能把当前 CI 包宣称为 Windows 7 已验证包。
 
 当前 macOS 开发机已验证 Python 行为测试、两架构 NSIS 模板编译及保护 DLL 的 x86/x64 交叉编译；测试安装器使用显式 synthetic payload 并自动删除。**Windows Qt 部署、最终 WiX 编译、真实 PFX 签名、安装/升级/卸载、协议接管保护和旧 Windows 实机运行仍需 Windows 环境验证。**
