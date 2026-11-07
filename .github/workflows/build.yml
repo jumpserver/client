@@ -4,6 +4,7 @@ on:
   push:
     tags: ['v*']
   pull_request:
+    branches: [osm-qt]
   workflow_dispatch:
     inputs:
       version:
@@ -37,9 +38,11 @@ env:
 
 jobs:
   metadata:
+    if: github.ref == 'refs/heads/osm-qt' || github.base_ref == 'osm-qt' || github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
       sign_macos: ${{ steps.version.outputs.sign_macos }}
       sign_windows: ${{ steps.version.outputs.sign_windows }}
       windows_matrix: ${{ steps.version.outputs.windows_matrix }}
@@ -307,7 +310,7 @@ jobs:
 
   release:
     needs: [metadata, macos, windows, linux]
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    if: (github.ref == 'refs/heads/osm-qt' || github.base_ref == 'osm-qt' || github.ref_type == 'tag') && (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -330,8 +333,9 @@ jobs:
           done
       - uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2.4.2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: OSMClient ${{ github.ref_name }}
+          tag_name: ${{ needs.metadata.outputs.release_tag }}
+          name: OSMClient ${{ needs.metadata.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
           draft: true
           prerelease: false
           generate_release_notes: true

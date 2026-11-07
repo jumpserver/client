@@ -26,6 +26,7 @@ class VersionPolicyTests(unittest.TestCase):
     def test_branch_default_is_unsigned(self):
         result = ci.resolve({}, self.cmake)
         self.assertEqual(result["version"], "4.1.2")
+        self.assertEqual(result["release_tag"], "v4.1.2")
         self.assertEqual(result["sign_macos"], "false")
         self.assertEqual(result["sign_windows"], "false")
         self.assertNotIn('"386"', result["windows_matrix"])
@@ -33,11 +34,13 @@ class VersionPolicyTests(unittest.TestCase):
     def test_tag_requests_mac_signing(self):
         result = ci.resolve({"GITHUB_REF_TYPE": "tag", "GITHUB_REF_NAME": "v4.2.7", "SIGN_MACOS": "false"}, self.cmake)
         self.assertEqual(result["version"], "4.2.7")
+        self.assertEqual(result["release_tag"], "v4.2.7")
         self.assertEqual(result["sign_macos"], "true")
 
     def test_dispatch_version_architecture_and_signing(self):
         result = ci.resolve({"REQUESTED_VERSION": "4.2.8", "INCLUDE_WINDOWS_X86": "true", "SIGN_WINDOWS": "true"}, self.cmake)
         self.assertEqual(result["version"], "4.2.8")
+        self.assertEqual(result["release_tag"], "v4.2.8")
         self.assertEqual(result["sign_windows"], "true")
         self.assertIn('"386"', result["windows_matrix"])
 

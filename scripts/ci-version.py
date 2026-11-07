@@ -35,8 +35,10 @@ def resolve(environ, cmake):
     windows = [{"arch": "amd64", "qt_arch": "x86_64", "msvc_arch": "amd64"}]
     if environ.get("INCLUDE_WINDOWS_X86", "false") == "true":
         windows.append({"arch": "386", "qt_arch": "x86", "msvc_arch": "amd64_x86"})
+    release_tag = environ.get("GITHUB_REF_NAME", "") if tag else "v" + selected
     return {
         "version": selected,
+        "release_tag": release_tag,
         "sign_macos": str(tag or environ.get("SIGN_MACOS") == "true").lower(),
         "sign_windows": str(environ.get("SIGN_WINDOWS") == "true").lower(),
         "windows_matrix": json.dumps({"include": windows}, separators=(",", ":")),

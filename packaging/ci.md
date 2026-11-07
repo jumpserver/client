@@ -1,6 +1,6 @@
 # 原生安装包 CI
 
-`.github/workflows/build.yml` 在独立的 `client-qt` 仓库根目录运行。只有 `v*` 标签、Pull Request 和手工 `workflow_dispatch` 触发构建；普通分支推送不再自动构建，需要验证时在 Actions 手工运行并选择目标分支。所有构建只上传 GitHub Actions artifacts（保留 14 天）。只有 `v*` 标签触发成功时，额外的 `release` job 汇总各平台 artifacts 创建同名 **draft** GitHub Release 并挂载安装包；PR 和手工运行不创建 Release。workflow 默认 `contents: read`，仅 `release` job 提升到 `contents: write`。
+`.github/workflows/build.yml` 在独立的 `client-qt` 仓库根目录运行，构建活动限定 `osm-qt` 分支：Pull Request 只接受目标分支 `osm-qt`（`on.pull_request.branches`），手工 `workflow_dispatch` 由 `metadata`/`release` 的 `if` 守卫限定 `github.ref == refs/heads/osm-qt`，从其它分支或 ref 手动触发时入口 job 被跳过、整条流水线不产出。唯一的例外是 `v*` 标签推送（`github.ref_type == 'tag'` 放行），用于按标签自动发布；tag 不隶属于分支，无法按分支过滤。普通分支推送不触发构建。所有构建只上传 GitHub Actions artifacts（保留 14 天）。`v*` 标签推送和 `osm-qt` 分支上的手工 `workflow_dispatch` 运行成功后，`release` job 汇总各平台 artifacts 创建 **draft** GitHub Release 并挂载安装包；PR 不创建 Release。workflow 默认 `contents: read`，仅 `release` job 提升到 `contents: write`。
 
 ## 构建矩阵
 
@@ -55,7 +55,9 @@ macOS/Windows 编译 Qt Base、Qt SVG、部署工具，关闭不用的 OpenGL、
 
 GitHub macOS hosted runner 偶发 `hdiutil create - Resource busy` 时，DMG 创建最多尝试 10 次（失败后间隔 5 秒，最多 9 次重试），仅清理本次未完成的目标文件；之后仍执行镜像校验、挂载检查、依赖检查及可用的启动 smoke test，不降低安装包的验证范围。
 
-标签构建的 `release` job 依赖全部构建 job 成功；任一平台构建失败则整个 release job 跳过，不会产出残缺 Release。它先校验 dmg/exe/msi/deb/rpm 五类安装包齐全，再用 `softprops/action-gh-release` 创建 **draft** Release（生成 release notes、不设为 latest），安装包和各 `.manifest.json` 校验文件作为 assets 上传。draft 不会对外可见，需要维护者在 Releases 页面人工确认后手动 publish；重复运行同一标签会复用并覆盖同名 assets。
+`release` job 依赖全部构建 job 成功；任一平台构建失败则整个 release job 跳过，不会产出残缺 Release。它先校验 dmg/exe/msi/deb/rpm 五类安装包齐全，再用 `softprops/action-gh-release` 创建 **draft** Release（生成 release notes、不设为 latest），安装包和各 `.manifest.json` 校验文件作为 assets 上传。draft 不会对外可见，需要维护者在 Releases 页面人工确认后手动 publish。
+
+Release 标签由 `scripts/ci-version.py` 的 `release_tag` 输出决定：标签推送用 `github.ref_name`（如 `v4.1.5`）；手工运行用 `v<version>`，`version` 输入框留空则取 CMake `CLIENT_VERSION` 默认值。`target_commitish` 固定为触发本次 run 的 `github.sha`，避免手工跑 `osm-qt` 分支时把标签指到默认分支 `dev`。同一标签重跑会复用已有 Release 并覆盖同名 assets；`draft: true` 显式设置，即使该标签原本已发布也会被更新回 draft。手工运行每次都会发/覆盖这个 `v<version>` Release，因此用同一版本号重复跑会持续覆盖；要保留历史版本需换 `version` 输入或改用新标签。
 
 本地已通过 actionlint、36 项打包回归，完成官方 Qt 5.15.19 的 arm64/x86_64 源码构建及两种应用构建。独立 Qt 5 与 Qt 6 的 CTest 各 5/5 通过。两个打包阶段强制逐个 Mach-O 检查架构、依赖和 minOS，并写入目标系统版本，超标立即失败。原生 ARM DMG 完成挂载内 Cocoa smoke；Intel 在无 Rosetta 的 ARM 主机交叉构建，显式记录未执行启动检查。复现说明见 [macOS 兼容构建](macos-compat.md)。
 
