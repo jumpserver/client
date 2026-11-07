@@ -47,4 +47,4 @@ Linux 格式为 deb/rpm，架构支持 amd64、arm64、386、arm、loong64、mip
 
 macOS `--sign` 优先使用已有 `APPLE_SIGNING_IDENTITY`/keychain；未设置时复用 `setup-apple-cert.py` 导入同名 P12 环境凭据，退出时清理临时钥匙串。Windows 复用已有 PFX 环境凭据。缺证书跳过签名并生成未签名包，提供了无效证书则真实报错；Linux 包签名仍由发行仓库单独处理。凭据变量及公证要求见 [安装包签名说明](README.md#ci-与签名)，不要把凭据写入脚本或命令参数。
 
-本机通过此主入口实际生成 ARM/Intel 两份 DMG，并完成原生 ARM 的 CTest 和挂载启动检查。Windows/Linux 分支完成 CLI 分发回归，完整安装包仍需在相应系统验证。运行 `python3 -m unittest discover -s tests -p 'test_*.py'` 可执行 Shell 入口与打包回归；CI 同样运行该测试集。
+本机通过此主入口实际生成 ARM/Intel 两份 DMG，并完成原生 ARM 的 CTest 和挂载启动检查。Windows/Linux 分支完成 CLI 分发回归，完整安装包仍需在相应系统验证。运行 `python3 -m unittest discover -s tests -p 'test_*.py'` 可执行 Shell 入口与打包回归；CI 只构建、打包和校验安装包，不运行该测试集。

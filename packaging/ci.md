@@ -49,7 +49,7 @@ macOS/Windows 编译 Qt Base、Qt SVG、部署工具，关闭不用的 OpenGL、
 
 ## 验证范围
 
-流水线执行离线打包回归测试、各平台 CTest，然后打包。Linux 在第二个干净容器中安装生成的包，检查依赖、MIME 注册、有效载荷及 `--smoke-test`。Windows 在一次性 GitHub-hosted runner 上验证 EXE/MSI 安装、安装后启动、正常卸载，以及其他应用接管 `jms` 后卸载仍保留该处理器。macOS 打包脚本检查 Mach-O 依赖和签名；签名任务另外执行 Apple 公证及 stapler 验证。
+流水线通过 `BUILD_TESTING=OFF` 只构建、打包和校验安装包，不编译测试程序，也不运行 CTest、Go 单元测试或离线打包回归测试（`tests/` 保留供本地验证）。Linux 在第二个干净容器中安装生成的包，检查依赖、MIME 注册、有效载荷及 `--smoke-test`。Windows 在一次性 GitHub-hosted runner 上验证 EXE/MSI 安装、安装后启动、正常卸载，以及其他应用接管 `jms` 后卸载仍保留该处理器。macOS 打包脚本检查 Mach-O 依赖和签名；签名任务另外执行 Apple 公证及 stapler 验证。
 
 本地已通过 actionlint、36 项打包回归，完成官方 Qt 5.15.19 的 arm64/x86_64 源码构建及两种应用构建。独立 Qt 5 与 Qt 6 的 CTest 各 5/5 通过。两个打包阶段强制逐个 Mach-O 检查架构、依赖和 minOS，并写入目标系统版本，超标立即失败。原生 ARM DMG 完成挂载内 Cocoa smoke；Intel 在无 Rosetta 的 ARM 主机交叉构建，显式记录未执行启动检查。复现说明见 [macOS 兼容构建](macos-compat.md)。
 

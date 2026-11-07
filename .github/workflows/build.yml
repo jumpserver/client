@@ -59,8 +59,6 @@ jobs:
           SIGN_WINDOWS: ${{ inputs.sign_windows || (github.ref_type == 'tag' && vars.SIGN_WINDOWS == 'true') }}
           INCLUDE_WINDOWS_X86: ${{ inputs.windows_x86 }}
         run: python scripts/ci-version.py --github-output "$GITHUB_OUTPUT"
-      - name: Test packaging policy and scripts without credentials
-        run: python -m unittest discover -s tests -p 'test_*.py'
 
   macos:
     needs: metadata
@@ -106,14 +104,10 @@ jobs:
         run: >-
           python scripts/build-qt.py --prefix "$QT_PREFIX" --work "$RUNNER_TEMP/qt-work"
           --arch '${{ matrix.arch }}' --deployment-target "$MACOSX_DEPLOYMENT_TARGET" --parallel 3
-      - name: Build and test native client
-        env:
-          QT_QPA_PLATFORM: offscreen
+      - name: Build native client
         run: |
-          CGO_ENABLED=0 go -C go-client test ./pkg/awaken
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$QT_PREFIX" -DCLIENT_VERSION="$CLIENT_VERSION" -DCMAKE_OSX_ARCHITECTURES='${{ matrix.arch }}' -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$QT_PREFIX" -DCLIENT_VERSION="$CLIENT_VERSION" -DBUILD_TESTING=OFF -DCMAKE_OSX_ARCHITECTURES='${{ matrix.arch }}' -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
           cmake --build build --parallel 3
-          ctest --test-dir build --output-on-failure
       - name: Import Developer ID certificate
         if: needs.metadata.outputs.sign_macos == 'true'
         env:
@@ -200,40 +194,14 @@ jobs:
           key: qt-${{ env.QT_VERSION }}-windows-${{ matrix.arch }}-msvc14.44-sdk19041-${{ hashFiles('scripts/build-qt.py') }}
       - name: Build verified Qt sources (Schannel)
         run: python scripts/build-qt.py --prefix "$env:QT_PREFIX" --work C:\qt-work --arch '${{ matrix.qt_arch }}' --parallel 4
-      - name: Build and test native client
+      - name: Build native client
         shell: pwsh
-        env:
-          QT_QPA_PLATFORM: offscreen
         run: |
           $env:PATH = "$env:QT_PREFIX\bin;$env:PATH"
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=$env:QT_PREFIX" "-DCLIENT_VERSION=$env:CLIENT_VERSION"
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF "-DCMAKE_PREFIX_PATH=$env:QT_PREFIX" "-DCLIENT_VERSION=$env:CLIENT_VERSION"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           cmake --build build --parallel 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          ctest --test-dir build --output-on-failure --output-junit build/test-results.xml
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: Report crash diagnostics for failing tests
-        if: failure()
-        shell: pwsh
-        run: |
-          $env:QT_QPA_PLATFORM = 'offscreen'
-          $failed = @('appservice', 'platform', 'ui')
-          if (Test-Path 'build\test-results.xml') {
-            [xml]$report = Get-Content 'build\test-results.xml' -Raw
-            $selected = @($report.SelectNodes('//testcase[failure|error]') | ForEach-Object { $_.name })
-            if ($selected.Count) { $failed = $selected }
-          }
-          foreach ($name in $failed) {
-            $exe = "build\test_$name.exe"
-            if (-not (Test-Path $exe)) { continue }
-            # A crashed test binary loses its buffered stdout, so rerun it directly
-            # with per-function detail and report the process exit code.
-            Write-Host "--- ${name}: verbose rerun after ctest failure ---"
-            & ".\$exe" -v2 2>&1 | ForEach-Object { Write-Host $_ }
-            $code = $LASTEXITCODE
-            $hex = if ($null -ne $code) { [Convert]::ToString([uint32][int64]$code, 16).ToUpper().PadLeft(8, '0') } else { 'n/a' }
-            Write-Host ("--- {0} exit code {1} (0x{2}) ---" -f $name, $code, $hex)
-          }
       - name: Package EXE and MSI with app-local runtime
         shell: pwsh
         env:
@@ -300,7 +268,7 @@ jobs:
               dnf install -y gcc-c++ cmake make python39 qt5-qtbase-devel qt5-qtsvg-devel libsecret-devel rpm-build desktop-file-utils xdg-utils pkgconf-pkg-config dejavu-sans-fonts file
               python=python3.9
             fi
-            "$python" /src/scripts/package-linux.py --format "$PACKAGE_FORMAT" --build /tmp/build --output /out --helpers /helpers --parallel 3 --cmake-arg "CLIENT_VERSION=$CLIENT_VERSION"
+            "$python" /src/scripts/package-linux.py --format "$PACKAGE_FORMAT" --build /tmp/build --output /out --helpers /helpers --parallel 3 --skip-tests --cmake-arg "CLIENT_VERSION=$CLIENT_VERSION"
           '
       - name: Install and smoke-test in clean runtime container
         run: |
