@@ -1,0 +1,7 @@
+/build*/
+/dist/
+/stage/
+.DS_Store
+/go-client/build/
+__pycache__/
+*.pyc

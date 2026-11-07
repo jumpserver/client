@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- WiX 3.14.x. Payload fragment and ownership guard are built by package-windows.py. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="OSMClient" Language="1033" Version="$(var.Version)"
+           Manufacturer="FIT2CLOUD" UpgradeCode="DAF0A2B2-B00D-48A9-A57C-668B31E368A0">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" InstallPrivileges="elevated" />
+    <MediaTemplate EmbedCab="yes" />
+    <!-- Remove the previous product and its old shortcut before installing the renamed shortcut. -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of OSMClient is already installed."
+                  AllowSameVersionUpgrades="yes" Schedule="afterInstallInitialize" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Icon Id="AppIcon" SourceFile="$(var.Icon)" />
+    <Property Id="NSISINSTALL" Secure="yes">
+      <RegistrySearch Id="FindNsisInstall" Root="HKLM" Win64="no" Type="raw"
+                      Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\OSMClient" Name="InstallLocation" />
+    </Property>
+    <Property Id="LEGACYNSIS" Secure="yes"><RegistrySearch Id="FindLegacyNsis" Root="HKCU" Win64="no" Type="raw" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\OSMClientQt" Name="InstallLocation" /></Property>
+    <Property Id="LEGACYMSI" Secure="yes"><RegistrySearch Id="FindLegacyMsi" Root="HKCU" Win64="no" Type="raw" Key="Software\FIT2CLOUD\OSMClientQt" Name="WindowsInstaller" /></Property>
+    <Condition Message="Uninstall the previous per-user OSMClient before installing this version.">Installed OR (NOT LEGACYNSIS AND NOT LEGACYMSI)</Condition>
+    <Condition Message="Uninstall the existing EXE package before installing the MSI package.">Installed OR NOT NSISINSTALL</Condition>
+    <Condition Message="This installer requires Windows 7 or later; the packaged Qt/CRT/Go build may require a newer system.">Installed OR VersionNT &gt;= 601</Condition>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="$(var.ProgramFilesDirectory)">
+          <Directory Id="INSTALLFOLDER" Name="OSMClient">
+            <Component Id="JmsRegistration" Guid="5B57B3C9-79BA-4710-93FB-074A79B1DA74" Win64="no">
+              <RegistryValue Id="MsiInstallMarker" Root="HKLM" Key="Software\FIT2CLOUD\OSMClient"
+                             Name="WindowsInstaller" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+            </Component>
+          </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Component Id="AppShortcut" Guid="2C898C38-93F4-41AC-A54A-A2C8D4AAD267" Win64="no">
+          <Shortcut Id="StartMenuShortcut" Name="OSMClient" Target="[#MainExecutable]"
+                    WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
+          <RegistryValue Root="HKLM" Key="Software\FIT2CLOUD\OSMClient" Name="Shortcut"
+                         Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+      <Directory Id="DesktopFolder">
+        <Component Id="DesktopShortcut" Guid="1669B23A-E729-41C7-801F-B49B8100559C" Win64="no">
+          <Shortcut Id="DesktopShortcutLink" Name="OSMClient" Target="[#MainExecutable]"
+                    WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
+          <RegistryValue Root="HKLM" Key="Software\FIT2CLOUD\OSMClient" Name="DesktopShortcut"
+                         Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </Directory>
+    <Binary Id="ProtocolGuard" SourceFile="$(var.ProtocolGuard)" />
+    <!-- Only temporary rows are inserted, before standard removal and writing.
+         Other applications' jms values never become uninstall targets. -->
+    <CustomAction Id="PrepareJmsRegistration" BinaryKey="ProtocolGuard" DllEntry="PrepareJmsRegistration"
+                  Execute="immediate" Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="PrepareJmsRegistration" Before="RemoveRegistryValues">1</Custom>
+    </InstallExecuteSequence>
+    <Feature Id="Complete" Title="OSMClient" Level="1">
+      <ComponentGroupRef Id="PayloadComponents" />
+      <ComponentRef Id="JmsRegistration" />
+      <ComponentRef Id="AppShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+  </Product>
+</Wix>

@@ -1,0 +1,304 @@
+name: Native packages
+
+on:
+  push:
+    branches: [main, master, osm, osm-qt]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Installer version X.Y.Z (empty: CMake default; tags must match)'
+        type: string
+        default: ''
+      sign_macos:
+        description: 'Request macOS signing/notarization (tags request it; missing credentials skip)'
+        type: boolean
+        default: false
+      sign_windows:
+        description: 'Request Windows Authenticode signing (missing PFX skips signing)'
+        type: boolean
+        default: false
+      windows_x86:
+        description: 'Also build Windows 32-bit installers (Windows 10+)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-packages-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  PYTHON_VERSION: '3.12.10'
+  GO_VERSION: '1.21.13'
+  QT_VERSION: '5.15.19'
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sign_macos: ${{ steps.version.outputs.sign_macos }}
+      sign_windows: ${{ steps.version.outputs.sign_windows }}
+      windows_matrix: ${{ steps.version.outputs.windows_matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Resolve safe installer version and signing policy
+        id: version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+          SIGN_MACOS: ${{ inputs.sign_macos }}
+          SIGN_WINDOWS: ${{ inputs.sign_windows || (github.ref_type == 'tag' && vars.SIGN_WINDOWS == 'true') }}
+          INCLUDE_WINDOWS_X86: ${{ inputs.windows_x86 }}
+        run: python scripts/ci-version.py --github-output "$GITHUB_OUTPUT"
+      - name: Test packaging policy and scripts without credentials
+        run: python -m unittest discover -s tests -p 'test_*.py'
+
+  macos:
+    needs: metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            deployment: '11.0'
+          - runner: macos-15-intel
+            arch: x86_64
+            deployment: '10.15'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment }}
+      CLIENT_VERSION: ${{ needs.metadata.outputs.version }}
+      SIGN_PACKAGE: ${{ needs.metadata.outputs.sign_macos }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go-client/go.sum
+      - name: Prepare fixed build tools
+        run: |
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          python -m pip install cmake==3.31.6 ninja==1.11.1.4
+          echo "QT_PREFIX=$RUNNER_TEMP/qt-5.15.19" >> "$GITHUB_ENV"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.QT_PREFIX }}
+          key: qt-${{ env.QT_VERSION }}-macos-${{ matrix.arch }}-xcode16.4-min${{ matrix.deployment }}-${{ hashFiles('scripts/build-qt.py') }}
+      - name: Build verified Qt sources (Secure Transport)
+        run: >-
+          python scripts/build-qt.py --prefix "$QT_PREFIX" --work "$RUNNER_TEMP/qt-work"
+          --arch '${{ matrix.arch }}' --deployment-target "$MACOSX_DEPLOYMENT_TARGET" --parallel 3
+      - name: Build and test native client
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          CGO_ENABLED=0 go -C go-client test ./pkg/awaken
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$QT_PREFIX" -DCLIENT_VERSION="$CLIENT_VERSION" -DCMAKE_OSX_ARCHITECTURES='${{ matrix.arch }}' -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
+          cmake --build build --parallel 3
+          ctest --test-dir build --output-on-failure
+      - name: Import Developer ID certificate
+        if: needs.metadata.outputs.sign_macos == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: python scripts/setup-apple-cert.py setup
+      - name: Bundle, sign and package DMG
+        env:
+          APPLE_ID: ${{ needs.metadata.outputs.sign_macos == 'true' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ needs.metadata.outputs.sign_macos == 'true' && secrets.APPLE_PASSWORD || '' }}
+        run: |
+          sign_args=()
+          notary_args=()
+          if [ "$SIGN_PACKAGE" = true ] && [ "${APPLE_SIGNING_ENABLED:-false}" = true ]; then
+            sign_args+=(--sign)
+            notary_args+=(--sign)
+            if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+              notary_args+=(--notarize)
+            else
+              echo 'Apple notarization credentials incomplete: creating signed, unnotarized DMG.'
+            fi
+          else
+            echo 'Developer ID signing unavailable or not requested: creating unsigned/ad-hoc DMG.'
+          fi
+          python scripts/package-macos.py --build build --macdeployqt "$QT_PREFIX/bin/macdeployqt" --output dist/OSMClient.app --deployment-target "$MACOSX_DEPLOYMENT_TARGET" "${sign_args[@]}"
+          python scripts/package-dmg.py --app dist/OSMClient.app --output "dist/OSMClient-${CLIENT_VERSION}-macos-${{ matrix.arch }}.dmg" --deployment-target "$MACOSX_DEPLOYMENT_TARGET" "${notary_args[@]}"
+      - name: Remove temporary signing keychain
+        if: always() && needs.metadata.outputs.sign_macos == 'true'
+        run: python scripts/setup-apple-cert.py cleanup
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OSMClient-${{ needs.metadata.outputs.version }}-macos-${{ matrix.arch }}
+          path: |
+            dist/*.dmg
+            dist/*.manifest.json
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    needs: metadata
+    runs-on: windows-2022
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.metadata.outputs.windows_matrix) }}
+    env:
+      CLIENT_VERSION: ${{ needs.metadata.outputs.version }}
+      QT_PREFIX: C:\qt-5.15.19
+      SIGN_PACKAGE: ${{ needs.metadata.outputs.sign_windows }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go-client/go.sum
+      - uses: ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c # v1.13.0
+        with:
+          arch: ${{ matrix.msvc_arch }}
+          toolset: '14.44'
+          sdk: '10.0.19041.0'
+      - name: Prepare fixed build and installer tools
+        shell: pwsh
+        run: |
+          python -m pip install cmake==3.31.6 ninja==1.11.1.4
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $wixBin = Join-Path $env:WIX 'bin'
+          $nsisBin = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
+          $wixVersion = (Get-Item (Join-Path $wixBin 'candle.exe')).VersionInfo.FileVersion
+          if (-not $wixVersion.StartsWith('3.14.1.')) { throw "Expected WiX 3.14.1, found $wixVersion" }
+          $nsisVersion = & (Join-Path $nsisBin 'makensis.exe') /VERSION
+          if ($nsisVersion.Trim() -ne 'v3.10') { throw "Expected NSIS v3.10, found $nsisVersion" }
+          $wixBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          $nsisBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.QT_PREFIX }}
+          key: qt-${{ env.QT_VERSION }}-windows-${{ matrix.arch }}-msvc14.44-sdk19041-${{ hashFiles('scripts/build-qt.py') }}
+      - name: Build verified Qt sources (Schannel)
+        run: python scripts/build-qt.py --prefix "$env:QT_PREFIX" --work C:\qt-work --arch '${{ matrix.qt_arch }}' --parallel 4
+      - name: Build and test native client
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $env:PATH = "$env:QT_PREFIX\bin;$env:PATH"
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=$env:QT_PREFIX" "-DCLIENT_VERSION=$env:CLIENT_VERSION"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build --parallel 4
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ctest --test-dir build --output-on-failure
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Package EXE and MSI with app-local runtime
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ needs.metadata.outputs.sign_windows == 'true' && secrets.WINDOWS_CERTIFICATE || '' }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ needs.metadata.outputs.sign_windows == 'true' && secrets.WINDOWS_CERTIFICATE_PASSWORD || '' }}
+        run: |
+          $signArgs = @()
+          if ($env:SIGN_PACKAGE -eq 'true') { $signArgs += '--sign' }
+          python scripts/package-windows.py --build build --windeployqt "$env:QT_PREFIX\bin\windeployqt.exe" --format both --arch '${{ matrix.arch }}' --output dist --skip-build --native-tls @signArgs
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify installer lifecycle and protocol ownership
+        shell: pwsh
+        run: ./packaging/windows/verify-installed.ps1 -Dist dist -Arch '${{ matrix.arch }}'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OSMClient-${{ needs.metadata.outputs.version }}-windows-${{ matrix.arch }}
+          path: |
+            dist/*.exe
+            dist/*.msi
+            dist/*.manifest.json
+          if-no-files-found: error
+          retention-days: 14
+
+  linux:
+    needs: metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - format: deb
+            image: debian:11.11-slim@sha256:70509c95d1857a3704c0a5d92ee2e0adac95f612a9386889d70760bfd7c1ebba
+          - format: rpm
+            image: rockylinux/rockylinux:8.10@sha256:f5529992e67440c1a4ae7788244d4381c6909159a88eacd95b7523ae47ced82e
+    env:
+      CLIENT_VERSION: ${{ needs.metadata.outputs.version }}
+      BUILD_IMAGE: ${{ matrix.image }}
+      PACKAGE_FORMAT: ${{ matrix.format }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go-client/go.sum
+      - name: Build target Go launchers
+        run: python scripts/build-launchers.py --goos linux --goarch amd64 --output helpers
+      - name: Build native package in distribution container
+        run: |
+          mkdir -p dist
+          docker run --rm --platform linux/amd64 -e CLIENT_VERSION -e PACKAGE_FORMAT -v "$PWD:/src:ro" -v "$PWD/helpers:/helpers:ro" -v "$PWD/dist:/out" "$BUILD_IMAGE" sh -ec '
+            if [ "$PACKAGE_FORMAT" = deb ]; then
+              sed -i "s|deb.debian.org/debian-security|archive.debian.org/debian-security|g" /etc/apt/sources.list
+              apt-get -o Acquire::Check-Valid-Until=false update
+              apt-get install -y --no-install-recommends cmake g++ make python3 qtbase5-dev libqt5svg5-dev libsecret-1-dev pkg-config dpkg-dev desktop-file-utils xdg-utils ca-certificates file
+              python=python3
+            else
+              sed -i "s|^mirrorlist=|#mirrorlist=|;s|^#baseurl=http://dl.rockylinux.org/|baseurl=https://dl.rockylinux.org/|" /etc/yum.repos.d/Rocky-*.repo
+              dnf install -y gcc-c++ cmake make python39 qt5-qtbase-devel qt5-qtsvg-devel libsecret-devel rpm-build desktop-file-utils xdg-utils pkgconf-pkg-config dejavu-sans-fonts file
+              python=python3.9
+            fi
+            "$python" /src/scripts/package-linux.py --format "$PACKAGE_FORMAT" --build /tmp/build --output /out --helpers /helpers --parallel 3 --cmake-arg "CLIENT_VERSION=$CLIENT_VERSION"
+          '
+      - name: Install and smoke-test in clean runtime container
+        run: |
+          docker run --rm --platform linux/amd64 -e PACKAGE_FORMAT -v "$PWD:/src:ro" -v "$PWD/dist:/out:ro" "$BUILD_IMAGE" sh -ec '
+            if [ "$PACKAGE_FORMAT" = deb ]; then
+              sed -i "s|deb.debian.org/debian-security|archive.debian.org/debian-security|g" /etc/apt/sources.list
+              apt-get -o Acquire::Check-Valid-Until=false update
+              apt-get install -y --no-install-recommends /out/*.deb
+            else
+              sed -i "s|^mirrorlist=|#mirrorlist=|;s|^#baseurl=http://dl.rockylinux.org/|baseurl=https://dl.rockylinux.org/|" /etc/yum.repos.d/Rocky-*.repo
+              dnf install -y /out/*.rpm
+            fi
+            sh /src/packaging/linux/verify-installed.sh
+          '
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OSMClient-${{ needs.metadata.outputs.version }}-linux-amd64-${{ matrix.format }}
+          path: |
+            dist/*.${{ matrix.format }}
+            dist/*.manifest.json
+            dist/*.metadata.txt
+          if-no-files-found: error
+          retention-days: 14

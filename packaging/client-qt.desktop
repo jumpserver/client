@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=OSMClient
+Name[zh_CN]=OSMClient
+Comment=OSMClient desktop client
+Exec=client-qt %u
+Icon=client-qt
+Terminal=false
+Categories=Network;RemoteAccess;
+MimeType=x-scheme-handler/jms;
+StartupNotify=true

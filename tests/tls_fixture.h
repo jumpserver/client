@@ -1,0 +1,85 @@
+#pragma once
+
+// PUBLIC SYNTHETIC TEST MATERIAL. This certificate and private key were generated
+// solely for the local loopback TLS server in test_appservice.cpp. They are not
+// credentials and must never be used by an application or a deployed server.
+// The first certificate has only DNS:localhost (a hostname mismatch for 127.0.0.1).
+// The second has IP:127.0.0.1, isolating the self-signed verification failure.
+// Embedded so tests need no openssl executable, system trust changes, or network.
+// Generated with: openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 36500
+// and SAN=DNS:localhost, CA:FALSE, keyUsage=digitalSignature,keyEncipherment,
+// extendedKeyUsage=serverAuth. Regenerating either value requires replacing both.
+
+static const char testTlsCertificatePem[] = R"PEM(-----BEGIN CERTIFICATE-----
+MIIDTjCCAjagAwIBAgIJAMC7mhYq040ZMA0GCSqGSIb3DQEBCwUAMD8xEjAQBgNV
+BAMMCWxvY2FsaG9zdDEpMCcGA1UECgwgUHVibGljIHN5bnRoZXRpYyBRdCB0ZXN0
+IGZpeHR1cmUwIBcNMjYxMTA2MTMwOTUxWhgPMjEyNjEwMTMxMzA5NTFaMD8xEjAQ
+BgNVBAMMCWxvY2FsaG9zdDEpMCcGA1UECgwgUHVibGljIHN5bnRoZXRpYyBRdCB0
+ZXN0IGZpeHR1cmUwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC1PFd8
+rCaFWzgHrz0QScwMi6X9ULrEeZbODjLsX+aitU/jwJaIhjTAKUiU5eABczeA+U5h
+GlvU9+tciju6nEOE/Qgj3/1pAaR+aSDHnCq+IVY1jCTIJ9HSuw5ru+xgFIYb4Amw
+nemIpLJ5omK/CWwgRc8Cg675wiAdnnlqoa/WgUKE96lx3an9b+WVH6CwqxqDWPQV
+oc+xnslCDnjtOZe2cJWhkApnMPXa5vEC/fgt01v7FSz9a8I3J1PdXpUnKnWjykqz
+i+uUV9JKATjzfU81+4xyVxG5hQiRo3jbIU/2NWq5EQJTqFzlXtMTNXyow0xGzqlB
+h4eairVFCim3XFdXAgMBAAGjSzBJMBQGA1UdEQQNMAuCCWxvY2FsaG9zdDAMBgNV
+HRMBAf8EAjAAMA4GA1UdDwEB/wQEAwIFoDATBgNVHSUEDDAKBggrBgEFBQcDATAN
+BgkqhkiG9w0BAQsFAAOCAQEAdywwR4TBJKZ8jiRYtrU7PnsQ5r9g/yNCPWbFs+HS
+XSTjTFDuhnAT6Tu5XSLO3fkGcdVvViE/iIc1gbd/+6eqpctHykfToIRWfUuViabd
+GWWyA/PzNRQhNkmjqp22SZ73rKob7W5rpGdPI2vFiyMM/Rmm511aVHXmH+qEbIQW
+MW55395/2ucVi4Ubhu1qjd8i6p+xISvKYTVutxrK27vkDuc2VCQcnCeEefziQxNw
+V61vUOBIGfZQ34AwDfSrXZR98icCc5VEt+ODDqDOZ4+AWb7fLBldfnt1gOyFKtTZ
+ak0MuK2/uei1p8NfKhtsDXJnKHdwOJl08ybO/BoHLQYMIw==
+-----END CERTIFICATE-----
+)PEM";
+
+static const char testTlsIpCertificatePem[] = R"PEM(-----BEGIN CERTIFICATE-----
+MIIDSTCCAjGgAwIBAgIJAIvMXL9EGpfBMA0GCSqGSIb3DQEBCwUAMD8xEjAQBgNV
+BAMMCTEyNy4wLjAuMTEpMCcGA1UECgwgUHVibGljIHN5bnRoZXRpYyBRdCB0ZXN0
+IGZpeHR1cmUwIBcNMjYxMTA2MTMxMzA1WhgPMjEyNjEwMTMxMzEzMDVaMD8xEjAQ
+BgNVBAMMCTEyNy4wLjAuMTEpMCcGA1UECgwgUHVibGljIHN5bnRoZXRpYyBRdCB0
+ZXN0IGZpeHR1cmUwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC1PFd8
+rCaFWzgHrz0QScwMi6X9ULrEeZbODjLsX+aitU/jwJaIhjTAKUiU5eABczeA+U5h
+GlvU9+tciju6nEOE/Qgj3/1pAaR+aSDHnCq+IVY1jCTIJ9HSuw5ru+xgFIYb4Amw
+nemIpLJ5omK/CWwgRc8Cg675wiAdnnlqoa/WgUKE96lx3an9b+WVH6CwqxqDWPQV
+oc+xnslCDnjtOZe2cJWhkApnMPXa5vEC/fgt01v7FSz9a8I3J1PdXpUnKnWjykqz
+i+uUV9JKATjzfU81+4xyVxG5hQiRo3jbIU/2NWq5EQJTqFzlXtMTNXyow0xGzqlB
+h4eairVFCim3XFdXAgMBAAGjRjBEMA8GA1UdEQQIMAaHBH8AAAEwDAYDVR0TAQH/
+BAIwADAOBgNVHQ8BAf8EBAMCBaAwEwYDVR0lBAwwCgYIKwYBBQUHAwEwDQYJKoZI
+hvcNAQELBQADggEBAFfkgS212TkKHEnu4PYfyo+edirXv7JDZaKgjqvNSyDk4U9H
+ofkUHU3yvDXbzaMstwHUh34X9CURHunqr46Thsf4MvHSfdZflJbw+FKhEq9fh9iF
+P/xXEQ8KS71dVsxgxDbO8sCbXuhq/ZGCgnVN9Qmeeorgon39mOt2zdWSAM34x9UP
+GMI6LryfL9TGDnRbF4tIxU0HmyPUYLn+mQx5D/EI1nDCQRLEwQOPVVEMMFo2E4Y1
+0ZIltUKPrbhSbI92ddDqvLrCHpyoQbDO7kyMiQULZYkzW73Ad7k9ICEXKZwVSLzn
+li/iGF4ieryyl26cnEt68H/bEcaoOJOhn7IRilg=
+-----END CERTIFICATE-----
+)PEM";
+
+static const char testTlsPrivateKeyPem[] = R"PEM(-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC1PFd8rCaFWzgH
+rz0QScwMi6X9ULrEeZbODjLsX+aitU/jwJaIhjTAKUiU5eABczeA+U5hGlvU9+tc
+iju6nEOE/Qgj3/1pAaR+aSDHnCq+IVY1jCTIJ9HSuw5ru+xgFIYb4AmwnemIpLJ5
+omK/CWwgRc8Cg675wiAdnnlqoa/WgUKE96lx3an9b+WVH6CwqxqDWPQVoc+xnslC
+DnjtOZe2cJWhkApnMPXa5vEC/fgt01v7FSz9a8I3J1PdXpUnKnWjykqzi+uUV9JK
+ATjzfU81+4xyVxG5hQiRo3jbIU/2NWq5EQJTqFzlXtMTNXyow0xGzqlBh4eairVF
+Cim3XFdXAgMBAAECggEBAJ+h57ljdIaPwzlZi+KV7cm7E1idS/SU2FTkwsva6K22
+IAkOcEkOVNZRRqIIHBeK4X+TmAsFiY97U27uPw/uZbZ0nT/kIjPkg3voozvOfQN9
+H48IwrkeAb2oj1ora1dxnHJfEonjfXijAKUMeAemh/uhIWYokO1ipKESHgXjJps7
+QEtrLmVbKMGVrMbfRrD8lQ6YT6kX2WSu5G7Mvihw40Vyh9XfT/wJCzY8o4ZO+qCt
+ckBW78g9R82pKU9T6aHJwkQQbcmrg4Rk3gmSCDD21A9cTIgzTDhkQN7GKjFrhj5j
+ebKbMldHi9s/rCq89iLTbDQMBo1f8XjTzHj8nFCuJWECgYEA7B+FkXOvelAlgI85
+v8nf4UdM+xC187BWJ0IBqddOGuu37Xt5DTe8b+HeiNTUUp5KFFi1517A4F/kiduH
+PZfJEKqV+G7LiDIrydXWcoCg+Dm43uljqxxXDrOjP2PQTq2c2yj6xzOxW3moODis
+1LOH+Zl1oXnoanicdoatemUG6qcCgYEAxH39hDRd9SbXue8iQG0op/roEBeAPw8N
+dV+8JOhOuyzNfGXChiheQmp56IrAKQ38Z1S0Tf3wwu9TCvddelAKZXUnjwDDrrWV
+t6G1PFt1Q/1/Bd/Wqm/jnJ/+OXoO8yna4hXquJ6KIU7ahCeH1O6xPF9SDmLI6saz
+ZMlUOMy8s9ECgYAk195NjdGJskvHvZFzPZqzWh7G5hqeBZvL0F7WE4RaawFuCuAe
+kd3TT1kb3KmsoopIlnb7vSs3V38fi6OUlsSG1zdDZnZXsAxpF/a4Mx3q3YbdMWmd
+33QuFRWZ5IcyX6CkCcbnokdAUMFQ1HcTUVgcODfElHMRefRgAi+7c1wa7QKBgQC4
+bW0rzp82ABxRt+OVRx/28ykoGXbVOUKvnYkRtz5Wrwm8LiM0GuXGPvxnyPvuTONQ
+9Y86+RQnU8zFKUMDD+eCLUFRFy2UaXm6XzymB0384A1+rQdm+BhSpVVQC4HGuM1q
+kZm7aYtLEiFGE3iJ4vRWLz3spMnim1g8TEASBBFGUQKBgEnDjy0mVWmgF6SkcIfz
+Ge50rqrbIAyvCZbXM9URlFnBDiGUJN0+Xr00EWad1aJZ99qvr3IeQzB/xKiaoQe4
+FitHa86FZQPs7Mhdt05dUSY0KeYMGijLk/+56U6sjTJ9VP0yO+sH9pjILCW0DB6M
+y0s0kxNswJRjtSAFdxWwhkCh
+-----END PRIVATE KEY-----
+)PEM";
