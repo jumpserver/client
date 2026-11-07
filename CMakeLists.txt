@@ -155,7 +155,8 @@ if(BUILD_TESTING)
     TEST_PYTHON_EXECUTABLE="${Python3_EXECUTABLE}"
     TEST_TLS_PROXY="${CMAKE_CURRENT_SOURCE_DIR}/tests/tls_proxy.py")
   # Includes full login/refresh/revoke flows over real, untrusted TLS.
-  set_tests_properties(appservice PROPERTIES TIMEOUT 60)
+  # Two TLS rows may each wait up to 15 seconds for the Python fixture to report its port.
+  set_tests_properties(appservice PROPERTIES TIMEOUT 120)
   add_executable(test_ui tests/test_ui.cpp resources/resources.qrc)
   target_link_libraries(test_ui PRIVATE client_ui ${QT_PACKAGE}::Test)
   add_test(NAME ui COMMAND test_ui)

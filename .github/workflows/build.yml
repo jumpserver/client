@@ -210,8 +210,29 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           cmake --build build --parallel 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          ctest --test-dir build --output-on-failure
+          ctest --test-dir build --output-on-failure --output-junit build/test-results.xml
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Report crash diagnostics for failing tests
+        if: failure()
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $failed = @('appservice', 'platform', 'ui')
+          if (Test-Path 'build\test-results.xml') {
+            [xml]$report = Get-Content 'build\test-results.xml' -Raw
+            $selected = @($report.SelectNodes('//testcase[failure|error]') | ForEach-Object { $_.name })
+            if ($selected.Count) { $failed = $selected }
+          }
+          foreach ($name in $failed) {
+            $exe = "build\test_$name.exe"
+            if (-not (Test-Path $exe)) { continue }
+            # A crashed test binary loses its buffered stdout, so rerun it directly
+            # with per-function detail and report the process exit code.
+            Write-Host "--- $name: verbose rerun after ctest failure ---"
+            & ".\$exe" -v2 2>&1 | ForEach-Object { Write-Host "$_" }
+            $code = $LASTEXITCODE
+            Write-Host "--- $name exit code $code (0x$($code.ToString('X8'))) ---"
+          }
       - name: Package EXE and MSI with app-local runtime
         shell: pwsh
         env:

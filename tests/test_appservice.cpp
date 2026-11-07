@@ -4,6 +4,7 @@
 
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QDesktopServices>
 #include <QJsonDocument>
 #include <QPointer>
@@ -55,6 +56,7 @@ public:
     QTemporaryDir tlsFiles;
     QProcess tlsProxy;
     quint16 tlsPort = 0;
+    QString startError;
     explicit HttpMock(bool tls = false, bool hostnameMismatch = true) : server(tls)
     {
         if (!server.listen(QHostAddress::LocalHost)) qFatal("Cannot start local test server");
@@ -88,18 +90,15 @@ public:
             // server-key import/signing path (which blocks in macOS securityd).
             const auto writeFixture = [&](const QString &name, const QByteArray &bytes) {
                 QFile file(tlsFiles.filePath(name));
-                if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size())
-                    qFatal("Cannot write synthetic TLS fixture");
+                if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size()) {
+                    startError = QStringLiteral("Cannot write synthetic TLS fixture %1 (%2)").arg(name, file.errorString());
+                    return false;
+                }
+                return true;
             };
-            writeFixture("certificate.pem", hostnameMismatch ? testTlsCertificatePem : testTlsIpCertificatePem);
-            writeFixture("key.pem", testTlsPrivateKeyPem);
-            tlsProxy.start(QString::fromUtf8(TEST_PYTHON_EXECUTABLE),
-                {QString::fromUtf8(TEST_TLS_PROXY), "--upstream", QString::number(server.serverPort()),
-                 "--certificate", tlsFiles.filePath("certificate.pem"), "--key", tlsFiles.filePath("key.pem")});
-            if (!tlsProxy.waitForStarted(5000) || !tlsProxy.waitForReadyRead(5000))
-                qFatal("Cannot start local TLS fixture");
-            tlsPort = tlsProxy.readLine().trimmed().toUShort();
-            if (!tlsPort) qFatal("Local TLS fixture did not report its port");
+            if (writeFixture("certificate.pem", hostnameMismatch ? testTlsCertificatePem : testTlsIpCertificatePem)
+                && writeFixture("key.pem", testTlsPrivateKeyPem))
+                startTlsProxy();
         }
     }
     ~HttpMock() override {
@@ -114,6 +113,43 @@ public:
     QString url() const
     {
         return QStringLiteral("%1://127.0.0.1:%2").arg(server.useTls ? "https" : "http").arg(server.useTls ? tlsPort : server.serverPort());
+    }
+    // The fixture is a separate interpreter, so a cold or loaded runner can need well
+    // over the 5 seconds this used to allow. Report why it stayed silent instead of
+    // aborting the whole test binary.
+    void startTlsProxy()
+    {
+        static constexpr qint64 StartupLimitMs = 15000;
+        // Unbuffered stdout plus an isolated interpreter keeps the cold start on a
+        // shared runner from dominating the wait for the reported port.
+        tlsProxy.start(QString::fromUtf8(TEST_PYTHON_EXECUTABLE),
+            {QStringLiteral("-I"), QStringLiteral("-S"), QStringLiteral("-B"), QStringLiteral("-u"),
+             QString::fromUtf8(TEST_TLS_PROXY), "--upstream", QString::number(server.serverPort()),
+             "--certificate", tlsFiles.filePath("certificate.pem"), "--key", tlsFiles.filePath("key.pem")});
+        QElapsedTimer waited;
+        waited.start();
+        while (tlsPort == 0 && waited.elapsed() < StartupLimitMs) {
+            if (!tlsProxy.waitForStarted(200)) {
+                if (tlsProxy.state() == QProcess::NotRunning) break;
+                continue;
+            }
+            if (tlsProxy.waitForReadyRead(200)) tlsPort = tlsProxy.readLine().trimmed().toUShort();
+        }
+        if (tlsPort == 0) {
+            QString detail = QStringLiteral("executable=%1").arg(QString::fromUtf8(TEST_PYTHON_EXECUTABLE));
+            if (tlsProxy.error() == QProcess::FailedToStart)
+                detail += QStringLiteral(", startError=%1").arg(tlsProxy.errorString());
+            else if (tlsProxy.state() == QProcess::NotRunning)
+                detail += QStringLiteral(", exited(code=%1, status=%2)").arg(tlsProxy.exitCode())
+                              .arg(tlsProxy.exitStatus() == QProcess::CrashExit ? QStringLiteral("crash") : QStringLiteral("normal"));
+            else
+                detail += QStringLiteral(", still starting");
+            const QByteArray stderrText = tlsProxy.readAllStandardError();
+            if (!stderrText.isEmpty())
+                detail += QStringLiteral(", stderr=%1").arg(QString::fromUtf8(stderrText).simplified());
+            startError = QStringLiteral("Local TLS fixture did not report its port within %1 ms (%2)")
+                .arg(StartupLimitMs).arg(detail);
+        }
     }
     static void reply(QTcpSocket *socket, QJsonValue value, int status = 200)
     {
@@ -160,6 +196,7 @@ private slots:
         QVERIFY(!QSslCertificate(QByteArray(testTlsIpCertificatePem)).isNull());
         QVERIFY(!QSslKey(QByteArray(testTlsPrivateKeyPem), QSsl::Rsa).isNull());
         HttpMock mock(true, hostnameMismatch);
+        QVERIFY2(mock.startError.isEmpty(), qPrintable(mock.startError));
         AppService service; service.m_persistCredentials = false;
 
         // First prove the exact server certificate is rejected by ordinary Qt
