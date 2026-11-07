@@ -37,6 +37,8 @@ macOS 沿用原 `clients` 的 Secrets 名称：
 
 `setup-apple-cert.py setup` 在证书凭据齐全时导入专用临时 keychain，导出被掩码的 identity hash、keychain 路径和 Team ID，以及 `APPLE_SIGNING_ENABLED=true`。缺少必需凭据时明确记录跳过签名，输出 `APPLE_SIGNING_ENABLED=false` 并继续生成 unsigned/ad-hoc 包；证书损坏、密码错误、签名执行失败仍使任务失败。签名可用时依次签名嵌套依赖、Go 启动器、应用及 DMG。只有公证凭据齐全才提交公证并装订票据；缺少时明确输出已签名、未公证 DMG。`always()` 清理步骤恢复原 keychain 搜索列表并删除临时 keychain。缓存和 artifacts 不含证书、私钥或临时 keychain。
 
+`xcrun stapler` 通过 HTTP/3（UDP 443）向 `api.apple-cloudkit.com` 取公证票据；GitHub `macos-15-intel` runner 到该端点的连接会间歇性断开并报 `Error 68` / `NSURLErrorDomain -1005`（[actions/runner-images#14924](https://github.com/actions/runner-images/issues/14924)）。公证构建在打包前对 x86_64 runner 临时封禁 UDP 443，强制 stapler 回退到 TCP HTTPS，仅作用于当前一次性 job；`package-dmg.py` 另外对 `staple`/`validate` 的瞬时网络错误最多重试 5 次、间隔 5 秒，非瞬时错误（如票据不存在）立即失败。公证被 Apple 拒绝仍直接报错，不重试。
+
 原项目 Windows 配置没有证书。新增可选 Secrets `WINDOWS_CERTIFICATE`（base64 PFX）和 `WINDOWS_CERTIFICATE_PASSWORD`；请求签名但缺少它们时记录跳过并生成 unsigned 包，实际证书或签名错误仍失败。为标签请求自动签名，另外显式设置仓库 Actions variable `SIGN_WINDOWS=true`。各包随附 manifest 记录实际签名/公证状态；开关代表请求，不代表签名已经完成。
 
 ## 固定依赖与缓存

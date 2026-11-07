@@ -352,6 +352,34 @@ class PackagingTests(unittest.TestCase):
             self.assertEqual(command.call_args_list[-2].args[0][1:3], ['stapler', 'staple'])
             self.assertEqual(command.call_args_list[-1].args[0][1:3], ['stapler', 'validate'])
 
+    def test_stapler_retries_transient_cloudkit_errors(self):
+        transient = RuntimeError("xcrun failed (68): Error 68. CloudKit's response is inconsistent "
+                                 "with expections: The network connection was lost.")
+        with patch.object(disk_package, 'run', side_effect=[transient, transient, '']) as command, \
+                patch.object(disk_package.time, 'sleep') as sleep, \
+                contextlib.redirect_stdout(io.StringIO()):
+            disk_package.run_stapler('staple', Path('/synthetic/test.dmg'))
+        self.assertEqual(command.call_count, 3)
+        self.assertEqual(sleep.call_args_list, [call(5), call(5)])
+
+    def test_stapler_does_not_retry_non_transient_errors(self):
+        with patch.object(disk_package, 'run', side_effect=RuntimeError('xcrun failed (65): ticket not found')) as command, \
+                patch.object(disk_package.time, 'sleep') as sleep:
+            with self.assertRaisesRegex(RuntimeError, 'ticket not found'):
+                disk_package.run_stapler('staple', Path('/synthetic/test.dmg'))
+        self.assertEqual(command.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_stapler_gives_up_after_transient_retries(self):
+        transient = RuntimeError('xcrun failed (68): The network connection was lost.')
+        with patch.object(disk_package, 'run', side_effect=[transient] * 5) as command, \
+                patch.object(disk_package.time, 'sleep') as sleep, \
+                contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(RuntimeError, 'network connection was lost'):
+                disk_package.run_stapler('staple', Path('/synthetic/test.dmg'))
+        self.assertEqual(command.call_count, 5)
+        self.assertEqual(sleep.call_count, 4)
+
 
 if __name__ == '__main__':
     unittest.main()

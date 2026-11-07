@@ -16,6 +16,26 @@ import time
 from macos_common import run, sign, resolve_signing, smoke
 
 
+STAPLER_NETWORK_ERRORS = (
+    'error 68', 'network connection was lost', 'cloudkit',
+    'nsurlerrordomain', 'kcfstreamerror',
+)
+
+
+def run_stapler(action, image, attempts=5, delay=5):
+    command = ['xcrun', 'stapler', action, str(image)]
+    for attempt in range(attempts):
+        try:
+            return run(command, timeout=300)
+        except RuntimeError as error:
+            message = str(error).lower()
+            transient = any(fragment in message for fragment in STAPLER_NETWORK_ERRORS)
+            if not transient or attempt == attempts - 1:
+                raise
+            print('Apple ticket lookup failed transiently; retrying stapler {}.'.format(action))
+            time.sleep(delay)
+
+
 def deployment_module():
     spec = importlib.util.spec_from_file_location('package_macos', Path(__file__).with_name('package-macos.py'))
     module = importlib.util.module_from_spec(spec)
@@ -35,8 +55,8 @@ def notarize(image):
     result = json.loads(output)
     if result.get('status') != 'Accepted':
         raise RuntimeError('Apple notarization was not accepted (submission {}); inspect its notarytool log'.format(result.get('id', 'unknown')))
-    run(['xcrun', 'stapler', 'staple', str(image)], timeout=300)
-    run(['xcrun', 'stapler', 'validate', str(image)])
+    run_stapler('staple', image)
+    run_stapler('validate', image)
     return result.get('id')
 
 

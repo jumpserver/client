@@ -115,6 +115,19 @@ jobs:
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: python scripts/setup-apple-cert.py setup
+      - name: Work around Intel stapler network failure
+        if: needs.metadata.outputs.sign_macos == 'true'
+        run: |
+          # xcrun stapler uses HTTP/3 (UDP 443) to fetch notarization tickets from
+          # api.apple-cloudkit.com. On macos-15-intel that path drops connections
+          # (actions/runner-images#14924, Error 68). Block UDP 443 for this job so
+          # stapler falls back to regular HTTPS/TCP; other traffic is unaffected.
+          # Only runs for notarized builds; an already-enabled pf or missing rule
+          # must not fail the job, so both pfctl calls are best-effort.
+          if [ "$(uname -m)" = "x86_64" ]; then
+            echo "block return out quick proto udp from any to any port 443" | sudo pfctl -f - || true
+            sudo pfctl -E || true
+          fi
       - name: Bundle, sign and package DMG
         env:
           APPLE_ID: ${{ needs.metadata.outputs.sign_macos == 'true' && secrets.APPLE_ID || '' }}
