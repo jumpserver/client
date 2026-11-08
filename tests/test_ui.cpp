@@ -58,6 +58,51 @@ private:
     }
     QFAIL("Requested method is missing");
   }
+  // Rebuilt cards stay alive until deleteLater() runs, so only unhidden cards
+  // belong to the protocol currently selected.
+  QList<QFrame *> applicationCards(QWidget *root) {
+    QList<QFrame *> result;
+    for (auto *card : root->findChildren<QFrame *>("appCard"))
+      if (!card->isHidden())
+        result.append(card);
+    return result;
+  }
+  QPushButton *applicationProtocolButton(QWidget *root, const QString &protocol) {
+    for (auto *button : root->findChildren<QPushButton *>("applicationProtocol"))
+      if (button->property("protocol").toString() == protocol)
+        return button;
+    return nullptr;
+  }
+  QStringList supportedApplicationNames(ConfigStore *config,
+                                        const QString &category,
+                                        const QString &protocol) {
+    QStringList result;
+    for (const auto &value : config->applications().value(category).toArray()) {
+      const QJsonObject item = value.toObject();
+      for (const auto &supported : item.value("protocol").toArray())
+        if (supported.toString() == protocol) {
+          result << item.value("display_name").toString();
+          break;
+        }
+    }
+    return result;
+  }
+  int defaultApplicationCount(ConfigStore *config, const QString &category,
+                              const QString &protocol) {
+    int count = 0;
+    for (const auto &value : config->applications().value(category).toArray())
+      for (const auto &matched : value.toObject().value("match_first").toArray())
+        if (matched.toString() == protocol)
+          ++count;
+    return count;
+  }
+  QLabel *applicationNotice(QWidget *root) {
+    QList<QLabel *> found;
+    for (auto *label : root->findChildren<QLabel *>())
+      if (label->property("role").toString() == "validation")
+        found.append(label);
+    return found.isEmpty() ? nullptr : found.first();
+  }
   QTemporaryDir directory;
   QJsonObject asset{{"id", "asset"}, {"name", "Test server"}};
   QJsonObject details{
@@ -920,20 +965,91 @@ private slots:
   void localApplicationPathsRemainConfigurable() {
     ConfigStore config(nullptr, directory.filePath("application-paths.json"));
     SettingsDialog dialog(&config, {}, nullptr);
-    auto *table = dialog.findChild<QTableWidget *>("applicationTable");
-    QVERIFY(table);
-    QVERIFY(table->horizontalHeaderItem(1)->text() != table->horizontalHeaderItem(2)->text());
-    auto *protocol = dialog.findChild<QComboBox *>("applicationProtocol");
-    QVERIFY(protocol);
+    QVERIFY(dialog.findChild<QScrollArea *>("applicationProtocols"));
+    QVERIFY(dialog.findChild<QScrollArea *>("applicationCardScroll"));
+    // Oracle is hidden from local application settings on every platform.
+    QVERIFY(!applicationProtocolButton(&dialog, "oracle"));
+    auto *ssh = applicationProtocolButton(&dialog, "ssh");
+    QVERIFY(ssh);
+    QVERIFY(ssh->isChecked());
+    QStringList terminalNames;
+    for (auto *card : applicationCards(&dialog))
+      terminalNames << card->findChild<QLabel *>("applicationName")->text();
+    QCOMPARE(terminalNames, supportedApplicationNames(&config, "terminal", "ssh"));
+    for (auto *card : applicationCards(&dialog)) {
+      QVERIFY(card->findChild<QPushButton *>("applicationBrowse"));
+      QVERIFY(card->findChild<QLabel *>("applicationComment"));
+      QStringList badges;
+      for (auto *label : card->findChildren<QLabel *>())
+        if (label->property("role").toString() == "appBadge")
+          badges << label->text();
+      QVERIFY(!badges.isEmpty());
+      QVERIFY(!badges.contains("ORACLE"));
+    }
 #ifdef Q_OS_MACOS
-    QVERIFY(!qobject_cast<QPushButton *>(table->cellWidget(0, 2))->isEnabled());
+    // macOS internal launchers are started by name, so they expose no path.
+    auto *managed = applicationCards(&dialog).first();
+    QCOMPARE(managed->findChild<QLabel *>("applicationPath")->text(),
+             ClientTheme::text("无需配置", "Managed automatically"));
+    QVERIFY(!managed->findChild<QPushButton *>("applicationBrowse")->isEnabled());
 #endif
-    protocol->setCurrentIndex(protocol->findData("vnc"));
-    QVERIFY(table->rowCount() > 0);
-    QVERIFY(qobject_cast<QPushButton *>(table->cellWidget(0, 2))->isEnabled());
+    QStringList vncNames;
+    applicationProtocolButton(&dialog, "vnc")->click();
+    for (auto *card : applicationCards(&dialog))
+      vncNames << card->findChild<QLabel *>("applicationName")->text();
+    QCOMPARE(vncNames, supportedApplicationNames(&config, "remotedesktop", "vnc"));
+    QVERIFY(!vncNames.isEmpty());
+    auto *vncCard = applicationCards(&dialog).first();
+    QVERIFY(vncCard->findChild<QPushButton *>("applicationBrowse")->isEnabled());
 #ifdef Q_OS_MACOS
-    QCOMPARE(table->item(0, 1)->text(), QString("/Applications/TigerVNC.app"));
+    // TigerVNC is external, so its path stays configurable and visible.
+    QCOMPARE(vncCard->findChild<QLabel *>("applicationPath")->text(),
+             QString("/Applications/TigerVNC.app"));
 #endif
+    applicationProtocolButton(&dialog, "ssh")->click();
+    QCOMPARE(applicationCards(&dialog).size(), terminalNames.size());
+  }
+  void localApplicationSwitchControlsDefault() {
+    ConfigStore config(nullptr, directory.filePath("application-default.json"));
+    SettingsDialog dialog(&config, {}, nullptr);
+    QVERIFY(applicationProtocolButton(&dialog, "mysql"));
+    applicationProtocolButton(&dialog, "mysql")->click();
+    QAbstractButton *current = nullptr, *spare = nullptr;
+    QString spareName;
+    for (auto *card : applicationCards(&dialog)) {
+      auto *toggle = card->findChild<QAbstractButton *>("applicationDefault");
+      QVERIFY(toggle);
+      if (toggle->isChecked())
+        current = toggle;
+      else if (!spare && toggle->isEnabled()) {
+        spare = toggle;
+        spareName = card->findChild<QLabel *>("applicationName")->text();
+      }
+    }
+    QVERIFY(current);
+    QVERIFY(spare);
+    QCOMPARE(defaultApplicationCount(&config, "databases", "mysql"), 1);
+    QSignalSpy changes(&config, &ConfigStore::changed);
+    current->click();
+    QCOMPARE(changes.count(), 1);
+    QCOMPARE(defaultApplicationCount(&config, "databases", "mysql"), 0);
+    // The page states that the protocol lost its only default client.
+    QVERIFY(!applicationNotice(&dialog)->text().isEmpty());
+    QVERIFY(!applicationNotice(&dialog)->isHidden());
+    QAbstractButton *replacement = nullptr;
+    for (auto *card : applicationCards(&dialog))
+      if (card->findChild<QLabel *>("applicationName")->text() == spareName)
+        replacement = card->findChild<QAbstractButton *>("applicationDefault");
+    QVERIFY(replacement);
+    replacement->click();
+    QCOMPARE(defaultApplicationCount(&config, "databases", "mysql"), 1);
+    QVERIFY(replacement->isChecked());
+    int checked = 0;
+    for (auto *card : applicationCards(&dialog))
+      if (card->findChild<QAbstractButton *>("applicationDefault")->isChecked())
+        ++checked;
+    QCOMPARE(checked, 1);
+    QVERIFY(applicationNotice(&dialog)->text().isEmpty());
   }
   void keyboardLayoutSelection() {
     ConfigStore config(nullptr, directory.filePath("keyboard-layout.json"));
@@ -1810,6 +1926,18 @@ private slots:
       navigation->setCurrentRow(3);
       QTest::qWait(30);
       QVERIFY(settings.grab().save(output + "/applications.png"));
+      auto *database = applicationProtocolButton(&settings, "mysql");
+      QVERIFY(database);
+      database->click();
+      QTest::qWait(30);
+      QVERIFY(settings.grab().save(output + "/applications-database.png"));
+      QSettings().setValue("appearance/theme", "dark");
+      ClientTheme::apply();
+      QTest::qWait(30);
+      QVERIFY(settings.grab().save(output + "/applications-dark.png"));
+      QSettings().setValue("appearance/theme", "system");
+      ClientTheme::apply();
+      QTest::qWait(30);
       navigation->setCurrentRow(4);
       QTest::qWait(30);
       QVERIFY(settings.grab().save(output + "/about.png"));

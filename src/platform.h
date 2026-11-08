@@ -24,6 +24,9 @@ public:
     QJsonObject applications();
     bool selectApplication(const QString &category, const QString &protocol,
                            const QString &name, const QString &path = QString());
+    // Remove the default client for a protocol. Connections then fail until the
+    // user selects one again, matching the local application switch semantics.
+    bool clearDefaultApplication(const QString &category, const QString &protocol);
     QString error() const { return error_; }
     static QString configPath();
     static QString platformKey();

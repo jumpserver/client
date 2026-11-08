@@ -19,6 +19,7 @@
 <file alias="icons/windows.png">icons/windows.png</file>
 <file alias="images/another_redis.png">images/another_redis.png</file>
 <file alias="images/dbeaver.png">images/dbeaver.png</file>
+<file alias="images/dbx.png">images/dbx.png</file>
 <file alias="images/item2.png">images/item2.png</file>
 <file alias="images/mobaxterm.png">images/mobaxterm.png</file>
 <file alias="images/mongodb.png">images/mongodb.png</file>

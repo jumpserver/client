@@ -2,18 +2,21 @@
 #include "platform.h"
 #include "theme.h"
 #include <QApplication>
+#include <QButtonGroup>
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
+#include <QClipboard>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFontComboBox>
+#include <QFontMetrics>
 #include <QFormLayout>
 #include <QFrame>
 #include <QGroupBox>
 #include <QHBoxLayout>
-#include <QHeaderView>
+#include <QHash>
 #include <QIcon>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -22,18 +25,105 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QPair>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
 #include <QShowEvent>
 #include <QTimer>
 #include <QSpinBox>
+#include <QToolButton>
 #include <QTabBar>
 #include <QTabWidget>
-#include <QTableWidget>
 #include <QTextEdit>
 #include <QVBoxLayout>
 using ClientTheme::text;
+namespace {
+struct ProtocolSection {
+  QString category;
+  QString titleZh;
+  QString titleEn;
+  QString icon;
+  QList<QPair<QString, QString>> protocols;
+};
+// Oracle is hidden from local application settings on purpose; the helper keeps
+// its Oracle routing, so existing launches are unaffected.
+const QStringList &hiddenProtocols() {
+  static const QStringList values{QStringLiteral("oracle")};
+  return values;
+}
+const QList<ProtocolSection> &protocolSections() {
+  static const QList<ProtocolSection> sections{
+      {QStringLiteral("terminal"), QStringLiteral("命令行终端"),
+       QStringLiteral("Command line"), QStringLiteral("terminal"),
+       {{QStringLiteral("ssh"), QStringLiteral("SSH")},
+        {QStringLiteral("telnet"), QStringLiteral("Telnet")}}},
+      {QStringLiteral("filetransfer"), QStringLiteral("文件传输"),
+       QStringLiteral("File transfer"), QStringLiteral("folder"),
+       {{QStringLiteral("sftp"), QStringLiteral("SFTP")}}},
+      {QStringLiteral("remotedesktop"), QStringLiteral("远程桌面"),
+       QStringLiteral("Remote desktop"), QStringLiteral("desktop"),
+       {{QStringLiteral("rdp"), QStringLiteral("RDP")},
+        {QStringLiteral("vnc"), QStringLiteral("VNC")}}},
+      {QStringLiteral("databases"), QStringLiteral("数据库"),
+       QStringLiteral("Database"), QStringLiteral("database"),
+       {{QStringLiteral("mysql"), QStringLiteral("MySQL")},
+        {QStringLiteral("mariadb"), QStringLiteral("MariaDB")},
+        {QStringLiteral("mongodb"), QStringLiteral("MongoDB")},
+        {QStringLiteral("redis"), QStringLiteral("Redis")},
+        {QStringLiteral("postgresql"), QStringLiteral("PostgreSQL")},
+        {QStringLiteral("sqlserver"), QStringLiteral("SQL Server")},
+        {QStringLiteral("oracle"), QStringLiteral("Oracle")}}}};
+  return sections;
+}
+QString sectionIcon(const QString &category) {
+  for (const auto &section : protocolSections())
+    if (section.category == category)
+      return section.icon;
+  return QStringLiteral("app");
+}
+QString sectionForProtocol(const QString &protocol) {
+  for (const auto &section : protocolSections())
+    for (const auto &entry : section.protocols)
+      if (entry.first == protocol)
+        return section.category;
+  return QStringLiteral("databases");
+}
+// Upstream ships a few application icons under names that differ from the
+// application key in config.json.
+QString applicationImageName(const QString &name) {
+  static const QHash<QString, QString> aliases{
+      {QStringLiteral("iterm"), QStringLiteral("item2")},
+      {QStringLiteral("tigervnc"), QStringLiteral("tigerVnc")},
+      {QStringLiteral("mongo_compass"), QStringLiteral("mongodb")},
+      {QStringLiteral("securefx"), QStringLiteral("securecrt")},
+      {QStringLiteral("vncviewer"), QStringLiteral("realvnc")},
+      {QStringLiteral("royalts"), QStringLiteral("royalts")}};
+  return aliases.value(name, name);
+}
+bool supportsProtocol(const QJsonObject &item, const QString &protocol) {
+  for (const QJsonValue &value : item.value("protocol").toArray())
+    if (value.toString() == protocol)
+      return true;
+  return false;
+}
+bool isDefaultApplication(const QJsonObject &item, const QString &protocol) {
+  for (const QJsonValue &value : item.value("match_first").toArray())
+    if (value.toString() == protocol)
+      return true;
+  return false;
+}
+QString localizedComment(const QJsonObject &item) {
+  const QJsonObject comment = item.value("comment").toObject();
+  const QString zh = comment.value("zh").toString();
+  const QString en = comment.value("en").toString();
+  if (zh.isEmpty())
+    return en;
+  if (en.isEmpty())
+    return zh;
+  return ClientTheme::text(zh.toUtf8().constData(), en.toUtf8().constData());
+}
+} // namespace
 SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
                                QWidget *parent)
     : QDialog(parent), m_config(config) {
@@ -65,9 +155,6 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
   navigation->setSpacing(3);
   navigation->setIconSize(QSize(18, 18));
   side->addWidget(navigation, 1);
-  auto *sideCaption = new QLabel("OSMClient", sidebar);
-  sideCaption->setProperty("muted", true);
-  side->addWidget(sideCaption);
   body->addWidget(sidebar);
   // Keep the page container and indices stable for keyboard navigation and
   // existing automation; the native tab strip is replaced by the side menu.
@@ -316,50 +403,101 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
     });
   }
   auto *apps = new QFrame;
-  auto *al = new QVBoxLayout(apps);
-  al->setContentsMargins(20, 20, 20, 20);
-  al->setSpacing(16);
+  auto *al = new QHBoxLayout(apps);
+  al->setContentsMargins(0, 0, 0, 0);
+  al->setSpacing(0);
   addPage(apps, text("本地应用", "Applications"),
-          text("为每种协议选择默认客户端，或指定已安装的应用。",
-               "Choose a default client for each protocol or locate an "
-               "installed application."),
+          text("先选择连接协议，再为它指定默认客户端或已安装的应用。",
+               "Pick a connection protocol, then choose its default client or "
+               "point to an installed application."),
           true);
-  m_protocol = new ClientTheme::ComboBox(this);
-  m_protocol->setObjectName("applicationProtocol");
-  for (const auto &p :
-       QStringList{"ssh", "telnet", "sftp", "rdp", "vnc", "mysql", "mariadb",
-                   "postgresql", "redis", "mongodb", "oracle", "sqlserver"})
-    m_protocol->addItem(p.toUpper(), p);
-  auto *protocolRow = new QHBoxLayout;
-  protocolRow->addWidget(new QLabel(text("连接协议", "Protocol"), apps));
-  protocolRow->addStretch();
-  m_protocol->setMinimumWidth(180);
-  protocolRow->addWidget(m_protocol);
-  al->addLayout(protocolRow);
-  m_applications = new QTableWidget(this);
-  m_applications->setObjectName("applicationTable");
-  m_applications->setShowGrid(false);
-  m_applications->setWordWrap(false);
-  m_applications->setFrameShape(QFrame::NoFrame);
-  m_applications->verticalHeader()->hide();
-  m_applications->setSelectionMode(QAbstractItemView::NoSelection);
-  m_applications->setColumnCount(5);
-  m_applications->setHorizontalHeaderLabels(
-      {text("应用", "Application"), text("路径", "Path"),
-       text("操作", "Action"), text("默认", "Default"),
-       text("下载", "Download")});
-  m_applications->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft |
-                                                          Qt::AlignVCenter);
-  m_applications->horizontalHeader()->setSectionResizeMode(
-      1, QHeaderView::Stretch);
-  m_applications->setEditTriggers(QAbstractItemView::NoEditTriggers);
-  al->addWidget(m_applications);
-  m_applicationError = new QLabel(apps);
+  const QJsonObject platformApplications = m_config->applications();
+  auto *protocolColumn = new QWidget(apps);
+  protocolColumn->setObjectName("settingsProtocolColumn");
+  auto *pc = new QVBoxLayout(protocolColumn);
+  pc->setContentsMargins(10, 10, 10, 10);
+  pc->setSpacing(1);
+  m_protocolGroup = new QButtonGroup(protocolColumn);
+  m_protocolGroup->setExclusive(true);
+  QPushButton *firstProtocol = nullptr;
+  for (const auto &section : protocolSections()) {
+    const QJsonArray items =
+        platformApplications.value(section.category).toArray();
+    QList<QPair<QString, QString>> protocols;
+    for (const auto &entry : section.protocols) {
+      if (hiddenProtocols().contains(entry.first))
+        continue;
+      bool configured = false;
+      for (const auto &value : items)
+        configured |= supportsProtocol(value.toObject(), entry.first);
+      if (configured)
+        protocols.append(entry);
+    }
+    if (protocols.isEmpty())
+      continue;
+    auto *heading = new QHBoxLayout;
+    heading->setContentsMargins(8, 8, 0, 1);
+    heading->setSpacing(6);
+    auto *headingIcon = new QLabel(protocolColumn);
+    headingIcon->setFixedSize(14, 14);
+    headingIcon->setPixmap(ClientTheme::icon(section.icon).pixmap(QSize(14, 14)));
+    heading->addWidget(headingIcon, 0, Qt::AlignVCenter);
+    auto *headingLabel =
+        new QLabel(text(section.titleZh.toUtf8().constData(),
+                        section.titleEn.toUtf8().constData()),
+                   protocolColumn);
+    headingLabel->setProperty("role", "groupLabel");
+    heading->addWidget(headingLabel, 1);
+    pc->addLayout(heading);
+    for (const auto &entry : protocols) {
+      auto *button = new QPushButton(entry.second, protocolColumn);
+      button->setObjectName("applicationProtocol");
+      button->setProperty("role", "protocolRow");
+      button->setProperty("protocol", entry.first);
+      button->setCheckable(true);
+      button->setCursor(Qt::PointingHandCursor);
+      button->setFocusPolicy(Qt::TabFocus);
+      m_protocolGroup->addButton(button);
+      connect(button, &QPushButton::clicked, this,
+              [this] { reloadApplications(); });
+      if (!firstProtocol)
+        firstProtocol = button;
+      pc->addWidget(button);
+    }
+  }
+  pc->addStretch();
+  auto *protocolScroll = new QScrollArea(apps);
+  protocolScroll->setObjectName("applicationProtocols");
+  protocolScroll->setFrameShape(QFrame::NoFrame);
+  protocolScroll->setWidgetResizable(true);
+  protocolScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  protocolScroll->setWidget(protocolColumn);
+  protocolScroll->setFixedWidth(190);
+  protocolScroll->setMinimumHeight(320);
+  al->addWidget(protocolScroll);
+  auto *cardHost = new QWidget;
+  cardHost->setObjectName("applicationCardHost");
+  auto *ch = new QVBoxLayout(cardHost);
+  ch->setContentsMargins(16, 14, 10, 14);
+  ch->setSpacing(12);
+  m_applicationCards = new QVBoxLayout;
+  m_applicationCards->setSpacing(12);
+  ch->addLayout(m_applicationCards);
+  m_applicationError = new QLabel(cardHost);
   m_applicationError->setWordWrap(true);
   m_applicationError->setProperty("role", "validation");
-  al->addWidget(m_applicationError);
-  connect(m_protocol, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-          [this] { reloadApplications(); });
+  ch->addWidget(m_applicationError);
+  ch->addStretch();
+  auto *cardScroll = new QScrollArea(apps);
+  cardScroll->setObjectName("applicationCardScroll");
+  cardScroll->setFrameShape(QFrame::NoFrame);
+  cardScroll->setWidgetResizable(true);
+  cardScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  cardScroll->setWidget(cardHost);
+  cardScroll->setMinimumHeight(320);
+  al->addWidget(cardScroll, 1);
+  if (firstProtocol)
+    firstProtocol->setChecked(true);
   reloadApplications();
   auto *about = new QFrame;
   auto *ab = new QVBoxLayout(about);
@@ -427,100 +565,222 @@ void SettingsDialog::showEvent(QShowEvent *event) {
     m_initialPlacement = false;
   });
 }
+QString SettingsDialog::selectedProtocol() const {
+  const QAbstractButton *button =
+      m_protocolGroup ? m_protocolGroup->checkedButton() : nullptr;
+  return button ? button->property("protocol").toString() : QString();
+}
+QWidget *SettingsDialog::applicationCard(const QJsonObject &item,
+                                         const QString &category,
+                                         const QString &protocol) {
+  const QString name = item.value("name").toString();
+  const QString display = item.value("display_name").toString(name);
+  const QString path = item.value("path").toString();
+  const bool internal = item.value("is_internal").toBool();
+  // Only macOS internal launchers resolve their application when they start, so
+  // their path is not configurable. Windows and Linux keep a configurable binary.
+  const bool managedPath = ConfigStore::platformKey() == QLatin1String("macos") &&
+                           internal && protocol != QLatin1String("vnc");
+  auto *card = new QFrame;
+  card->setObjectName("appCard");
+  auto makeBadge = [](const QString &label, QWidget *parent) {
+    auto *badge = new QLabel(label, parent);
+    badge->setProperty("role", "appBadge");
+    badge->setAlignment(Qt::AlignCenter);
+    QFont font = badge->font();
+    font.setPointSizeF(qMax(8.0, font.pointSizeF() - 1.0));
+    badge->setFont(font);
+    badge->setFixedHeight(19);
+    badge->setFixedWidth(QFontMetrics(font).horizontalAdvance(label) + 12);
+    return badge;
+  };
+  auto *outer = new QVBoxLayout(card);
+  outer->setContentsMargins(14, 12, 14, 12);
+  outer->setSpacing(8);
+  auto *header = new QHBoxLayout;
+  header->setSpacing(12);
+  auto *icon = new QLabel(card);
+  icon->setProperty("role", "appIcon");
+  icon->setFixedSize(40, 40);
+  icon->setAlignment(Qt::AlignCenter);
+  const QPixmap image =
+      QPixmap(QStringLiteral(":/images/%1.png").arg(applicationImageName(name)));
+  icon->setPixmap(image.isNull()
+                      ? ClientTheme::icon(sectionIcon(category)).pixmap(QSize(22, 22))
+                      : image.scaled(30, 30, Qt::KeepAspectRatio,
+                                     Qt::SmoothTransformation));
+  icon->setToolTip(display);
+  header->addWidget(icon, 0, Qt::AlignTop);
+  auto *info = new QVBoxLayout;
+  info->setSpacing(6);
+  auto *titleRow = new QHBoxLayout;
+  titleRow->setSpacing(10);
+  auto *title = new ClientTheme::ElidedLabel(display, card);
+  title->setObjectName("applicationName");
+  title->setProperty("role", "appName");
+  titleRow->addWidget(title, 1);
+  auto *toggle = new ClientTheme::Switch(card);
+  toggle->setObjectName("applicationDefault");
+  const bool preferred = isDefaultApplication(item, protocol);
+  toggle->setChecked(preferred);
+  // The helper only launches an application it can find, so a non-internal
+  // entry without a path cannot become the default until the user locates it.
+  const bool canEnable = internal || !path.trimmed().isEmpty();
+  toggle->setEnabled(canEnable);
+  toggle->setAccessibleName(text("默认客户端", "Default client"));
+  toggle->setToolTip(
+      !canEnable ? text("请先选择客户端程序路径。",
+                        "Choose the application path first.")
+                 : preferred ? text("当前协议的默认客户端",
+                                    "Default client for this protocol")
+                             : text("设为当前协议的默认客户端",
+                                    "Set as the default client for this protocol"));
+  connect(toggle, &QAbstractButton::toggled, this,
+          [this, category, protocol, name](bool on) {
+            const bool saved =
+                on ? m_config->selectApplication(category, protocol, name)
+                   : m_config->clearDefaultApplication(category, protocol);
+            if (!saved)
+              QMessageBox::warning(this, text("保存失败", "Save failed"),
+                                   m_config->error());
+            reloadApplications();
+          });
+  titleRow->addWidget(toggle, 0, Qt::AlignTop);
+  info->addLayout(titleRow);
+  auto *pathRow = new QHBoxLayout;
+  pathRow->setSpacing(6);
+  auto *chip = new ClientTheme::ElidedLabel(
+      managedPath ? text("无需配置", "Managed automatically")
+                  : (path.isEmpty() ? QStringLiteral("-") : path),
+      card);
+  chip->setObjectName("applicationPath");
+  chip->setProperty("role", "appPath");
+  chip->setContentsMargins(8, 3, 8, 3);
+  chip->setFixedHeight(24);
+  chip->setMaximumWidth(360);
+  chip->setToolTip(managedPath
+                       ? text("此客户端无需指定程序路径。",
+                              "This client does not require a program path.")
+                       : path);
+  pathRow->addWidget(chip, 1);
+  if (!managedPath && !path.isEmpty()) {
+    auto *copy = new QToolButton(card);
+    copy->setObjectName("applicationCopyPath");
+    copy->setAutoRaise(true);
+    copy->setCursor(Qt::PointingHandCursor);
+    copy->setIconSize(QSize(14, 14));
+    copy->setFixedSize(20, 20);
+    copy->setIcon(ClientTheme::icon("copy"));
+    copy->setToolTip(text("复制路径", "Copy path"));
+    copy->setAccessibleName(copy->toolTip());
+    pathRow->addWidget(copy, 0, Qt::AlignVCenter);
+    connect(copy, &QToolButton::clicked, this, [this, copy, path] {
+      QApplication::clipboard()->setText(path);
+      copy->setIcon(ClientTheme::icon("check"));
+      QTimer::singleShot(1200, copy, [copy] {
+        copy->setIcon(ClientTheme::icon("copy"));
+      });
+    });
+  }
+  auto *browse = new QPushButton(
+      managedPath || !path.isEmpty() ? text("浏览", "Browse")
+                                     : text("选择路径", "Select path"),
+      card);
+  browse->setObjectName("applicationBrowse");
+  browse->setProperty("quiet", true);
+  browse->setEnabled(!managedPath);
+  if (managedPath)
+    browse->setToolTip(chip->toolTip());
+  pathRow->addWidget(browse, 0, Qt::AlignVCenter);
+  connect(browse, &QPushButton::clicked, this, [this, category, protocol, name] {
+    const QString selected = QFileDialog::getOpenFileName(
+        this, text("选择客户端程序", "Choose application"));
+    if (selected.isEmpty())
+      return;
+    if (!m_config->selectApplication(category, protocol, name, selected))
+      QMessageBox::warning(this, text("保存失败", "Save failed"),
+                           m_config->error());
+    reloadApplications();
+  });
+  info->addLayout(pathRow);
+  header->addLayout(info, 1);
+  outer->addLayout(header);
+  auto *badges = new QHBoxLayout;
+  badges->setSpacing(5);
+  QStringList supported;
+  for (const QJsonValue &value : item.value("protocol").toArray()) {
+    const QString key = value.toString();
+    if (!hiddenProtocols().contains(key))
+      supported << key.toUpper();
+  }
+  // Badge widths are measured with the font they render with, so the pills never
+  // clip. Long protocol lists collapse into a "+N" pill that keeps the full list
+  // in its tooltip, which also keeps narrow windows readable.
+  const int visible = qMin(supported.size(), 5);
+  for (int i = 0; i < visible; ++i)
+    badges->addWidget(makeBadge(supported.at(i), card));
+  if (supported.size() > visible) {
+    auto *more = makeBadge(QStringLiteral("+%1").arg(supported.size() - visible), card);
+    more->setToolTip(supported.join(QStringLiteral(" · ")));
+    badges->addWidget(more);
+  }
+  badges->addStretch();
+  const QUrl download(item.value("download_url").toString());
+  if (download.isValid() && !download.host().isEmpty() &&
+      (download.scheme() == QLatin1String("http") ||
+       download.scheme() == QLatin1String("https"))) {
+    auto *downloadButton = new QPushButton(text("下载应用", "Download app"), card);
+    downloadButton->setObjectName("applicationDownload");
+    downloadButton->setProperty("soft", true);
+    downloadButton->setIcon(ClientTheme::icon("download"));
+    badges->addWidget(downloadButton, 0, Qt::AlignVCenter);
+    connect(downloadButton, &QPushButton::clicked, this,
+            [download] { QDesktopServices::openUrl(download); });
+  }
+  outer->addLayout(badges);
+  const QString comment = localizedComment(item);
+  if (!comment.isEmpty()) {
+    auto *description = new QLabel(comment, card);
+    description->setObjectName("applicationComment");
+    description->setProperty("role", "appComment");
+    description->setWordWrap(true);
+    outer->addWidget(description);
+  }
+  return card;
+}
 void SettingsDialog::reloadApplications() {
-  m_applications->setRowCount(0);
-  const QString protocol = m_protocol->currentData().toString();
-  QString category = "databases";
-  if (protocol == "ssh" || protocol == "telnet")
-    category = "terminal";
-  else if (protocol == "sftp")
-    category = "filetransfer";
-  else if (protocol == "rdp" || protocol == "vnc")
-    category = "remotedesktop";
+  while (QLayoutItem *item = m_applicationCards->takeAt(0)) {
+    if (auto *widget = item->widget()) {
+      widget->hide();
+      widget->deleteLater();
+    }
+    delete item;
+  }
+  const QString protocol = selectedProtocol();
+  const QString category = sectionForProtocol(protocol);
   const QJsonObject applications = m_config->applications();
-  m_applicationError->setText(m_config->error());
-  m_applicationError->setVisible(!m_config->error().isEmpty());
-  for (const auto &v : applications[category].toArray()) {
-    const auto item = v.toObject();
-    bool supports = false;
-    for (const auto &p : item["protocol"].toArray())
-      if (p.toString() == protocol)
-        supports = true;
-    if (!supports)
+  int shown = 0;
+  bool hasDefault = false;
+  for (const auto &value : applications.value(category).toArray()) {
+    const QJsonObject item = value.toObject();
+    if (!supportsProtocol(item, protocol))
       continue;
-    const QString name = item["name"].toString();
-    int row = m_applications->rowCount();
-    m_applications->insertRow(row);
-    m_applications->setRowHeight(row, 56);
-    m_applications->setItem(
-        row, 0, new QTableWidgetItem(item["display_name"].toString(name)));
-    // Only macOS internal terminal/RDP launchers ignore the configured path.
-    // Windows and Linux internal entries can still use a configurable binary.
-    const bool managedPath = ConfigStore::platformKey() == "macos" &&
-                             item["is_internal"].toBool() && protocol != "vnc";
-    auto *pathItem = new QTableWidgetItem(managedPath ? text("无需配置", "Managed automatically")
-                                                  : item["path"].toString());
-    pathItem->setToolTip(managedPath ? text("此客户端无需指定程序路径。", "This client does not require a program path.")
-                                 : item["path"].toString());
-    m_applications->setItem(row, 1, pathItem);
-    auto *browse = new QPushButton(text("浏览", "Browse"), this);
-    browse->setProperty("quiet", true);
-    browse->setEnabled(!managedPath);
-    if (managedPath) browse->setToolTip(pathItem->toolTip());
-    m_applications->setCellWidget(row, 2, browse);
-    connect(browse, &QPushButton::clicked, this,
-            [this, category, protocol, name] {
-              const QString path = QFileDialog::getOpenFileName(
-                  this, text("选择客户端程序", "Choose application"));
-              if (path.isEmpty())
-                return;
-              if (!m_config->selectApplication(category, protocol, name, path))
-                QMessageBox::warning(this, text("保存失败", "Save failed"),
-                                     m_config->error());
-              reloadApplications();
-            });
-    bool preferred = false;
-    for (const auto &p : item["match_first"].toArray())
-      if (p.toString() == protocol)
-        preferred = true;
-    auto *choose = new QPushButton(preferred ? text("已选择", "Selected")
-                                             : text("设为默认", "Set default"),
-                                   this);
-    choose->setEnabled(!preferred);
-    choose->setProperty("quiet", true);
-    choose->setProperty("selected", preferred);
-    m_applications->setCellWidget(row, 3, choose);
-    connect(choose, &QPushButton::clicked, this,
-            [this, category, protocol, name] {
-              if (!m_config->selectApplication(category, protocol, name))
-                QMessageBox::warning(this, text("保存失败", "Save failed"),
-                                     m_config->error());
-              reloadApplications();
-            });
-    const QUrl download(item.value("download_url").toString());
-    if (download.isValid() && !download.host().isEmpty() &&
-        (download.scheme() == "http" || download.scheme() == "https")) {
-      auto *downloadButton = new QPushButton(text("下载", "Download"), this);
-      downloadButton->setProperty("quiet", true);
-      m_applications->setCellWidget(row, 4, downloadButton);
-      connect(downloadButton, &QPushButton::clicked, this,
-              [download] { QDesktopServices::openUrl(download); });
-    }
+    hasDefault |= isDefaultApplication(item, protocol);
+    m_applicationCards->addWidget(applicationCard(item, category, protocol));
+    ++shown;
   }
-  if (m_applications->rowCount() == 0 && m_config->error().isEmpty()) {
-    m_applicationError->setText(text("当前协议没有配置本地应用。", "No local applications are configured for this protocol."));
-    m_applicationError->show();
-  }
-  m_applications->resizeColumnToContents(0);
-  for (int column : {2, 3, 4}) {
-    int width = 72;
-    for (int row = 0; row < m_applications->rowCount(); ++row) {
-      auto *button = m_applications->cellWidget(row, column);
-      if (!button)
-        continue;
-      button->ensurePolished();
-      width = qMax(width, button->sizeHint().width() + 12);
-    }
-    m_applications->setColumnWidth(column, width);
-  }
+  if (!m_config->error().isEmpty())
+    m_applicationError->setText(m_config->error());
+  else if (shown == 0)
+    m_applicationError->setText(
+        text("当前协议没有配置本地应用。",
+             "No local applications are configured for this protocol."));
+  else if (!hasDefault)
+    m_applicationError->setText(
+        text("当前协议还没有默认客户端，连接该协议的资产会失败。请打开一个应用的开关。",
+             "This protocol has no default client, so connections using it will "
+             "fail. Turn on one of the applications above."));
+  else
+    m_applicationError->clear();
+  m_applicationError->setVisible(!m_applicationError->text().isEmpty());
 }

@@ -195,6 +195,7 @@ func awakenDBCommand(r *Rouse, cfg *config.AppConfig) *exec.Cmd {
 	if r.Protocol == "oracle" {
 		connectMap["dbname"] = r.getUserName()
 	}
+	applyDBXProtocol(connectMap, appItem.Name, r.Protocol)
 	if appItem.IsInternal {
 		var argFormat string
 		switch r.Protocol {
@@ -224,7 +225,7 @@ func awakenDBCommand(r *Rouse, cfg *config.AppConfig) *exec.Cmd {
 				return nil
 			}
 		}
-		if r.Protocol == "sqlserver" {
+		if r.Protocol == "sqlserver" && appItem.Name != "dbx" {
 			connectMap["protocol"] = "mssql_jdbc_ms_new"
 		}
 		commands := getCommandFromArgs(connectMap, appItem.ArgFormat)

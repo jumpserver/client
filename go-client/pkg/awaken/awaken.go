@@ -105,6 +105,20 @@ func removeCurRdpVncFile() {
 	}
 }
 
+func applyDBXProtocol(connectMap map[string]string, appName, protocol string) {
+	if appName != "dbx" {
+		return
+	}
+	switch protocol {
+	case "postgresql":
+		connectMap["protocol"] = "postgres"
+	case "sqlserver":
+		connectMap["protocol"] = "mssql"
+	default:
+		connectMap["protocol"] = protocol
+	}
+}
+
 func (r *Rouse) HandleRDP(appConfig *config.AppConfig) {
 	removeCurRdpVncFile()
 	fileName, _ := url.QueryUnescape(r.File.Name)

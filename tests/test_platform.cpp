@@ -78,6 +78,32 @@ private slots:
         QVERIFY(file.open(QIODevice::ReadOnly));
         QCOMPARE(file.readAll(), QByteArray("broken json"));
     }
+    void clearDefaultApplicationOnlyTouchesTheChosenProtocol() {
+        QTemporaryDir dir;
+        ConfigStore store(nullptr, dir.filePath("config.json"));
+        const auto first = store.applications().value("terminal").toArray().first().toObject();
+        const QString name = first.value("name").toString();
+        const QJsonArray protocols = first.value("protocol").toArray();
+        QVERIFY(protocols.size() >= 2);
+        const QString kept = protocols.at(0).toString(), cleared = protocols.at(1).toString();
+        QVERIFY(store.selectApplication("terminal", kept, name));
+        QVERIFY(store.selectApplication("terminal", cleared, name));
+        QFile file(dir.filePath("config.json"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QByteArray before = file.readAll(); file.close();
+        // Clearing a protocol nobody owns keeps the file untouched, and an empty
+        // protocol is reported instead of silently rewriting every entry.
+        QVERIFY(store.clearDefaultApplication("terminal", "sftp"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), before);
+        file.close();
+        QVERIFY(!store.clearDefaultApplication("terminal", QString()));
+        QVERIFY(!store.error().isEmpty());
+        QVERIFY(store.clearDefaultApplication("terminal", cleared));
+        const auto after = store.applications().value("terminal").toArray().first().toObject();
+        QVERIFY(after.value("match_first").toArray().contains(kept));
+        QVERIFY(!after.value("match_first").toArray().contains(cleared));
+    }
     void connectionAddressValidation() {
         QVERIFY(!Launcher::isConnectionUrl("jms://auth/callback?code=secret"));
         QVERIFY(!Launcher::isConnectionUrl("https://example.com"));

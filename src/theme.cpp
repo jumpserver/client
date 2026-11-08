@@ -7,8 +7,10 @@
 #include <QLocale>
 #include <QListView>
 #include <QPainter>
+#include <QFontMetrics>
 #include <QScreen>
 #include <QSettings>
+#include <QResizeEvent>
 #include <QStyle>
 #include <QSvgRenderer>
 #include <QStyledItemDelegate>
@@ -170,7 +172,10 @@ public:
       {"desktop", "<rect x='3' y='3' width='18' height='14' rx='2'/><path d='M8 21h8M12 17v4'/>"},
       {"palette", "<path d='M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1-3.7 2 2 0 0 1 1-3.7h3a3 3 0 0 0 3-3A9 9 0 0 0 12 3Z'/><path d='M7 10h.01M10 6.5h.01M15 7h.01M6 15h.01'/>"},
       {"app", "<rect x='3' y='3' width='7' height='7' rx='2'/><rect x='14' y='3' width='7' height='7' rx='2'/><rect x='3' y='14' width='7' height='7' rx='2'/><path d='M14 17.5h7M17.5 14v7'/>"},
-      {"info", "<circle cx='12' cy='12' r='9'/><path d='M12 11v6M12 7h.01'/>"}
+      {"info", "<circle cx='12' cy='12' r='9'/><path d='M12 11v6M12 7h.01'/>"},
+      {"folder", "<path d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z'/>"},
+      {"download", "<path d='M12 4v11m-4-4 4 4 4-4M4 19h16'/>"},
+      {"copy", "<rect x='9' y='9' width='11' height='11' rx='2'/><path d='M15 5a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2'/>"}
     };
     const auto c = ClientTheme::colors();
     const bool filledStar = m_name == "star-filled";
@@ -220,6 +225,68 @@ void ComboBox::showPopup() {
   const int available = screen() ? screen()->availableGeometry().width() - 24 : popupWidth;
   view()->setMinimumWidth(qMin(popupWidth, qMax(1, available)));
   QComboBox::showPopup();
+}
+Switch::Switch(QWidget *parent) : QAbstractButton(parent) {
+  setCheckable(true);
+  setCursor(Qt::PointingHandCursor);
+  setFocusPolicy(Qt::TabFocus);
+}
+QSize Switch::sizeHint() const { return {40, 22}; }
+void Switch::paintEvent(QPaintEvent *) {
+  const auto c = colors();
+  QPainter p(this);
+  p.setRenderHint(QPainter::Antialiasing);
+  if (!isEnabled())
+    p.setOpacity(0.5);
+  const QRectF track = QRectF(rect()).adjusted(1, 1, -1, -1);
+  const qreal radius = track.height() / 2;
+  p.setPen(isChecked() ? Qt::NoPen : QPen(c.border, 1));
+  p.setBrush(isChecked() ? c.accent : c.hover);
+  p.drawRoundedRect(track, radius, radius);
+  const qreal diameter = track.height() - 6;
+  const qreal left = isChecked() ? track.right() - diameter - 3 : track.left() + 3;
+  const QRectF knob(left, track.top() + 3, diameter, diameter);
+  p.setPen(Qt::NoPen);
+  p.setBrush(isChecked() ? Qt::white : c.panel);
+  p.drawEllipse(knob);
+  const QColor glyph = isChecked() ? c.accent : c.muted;
+  const QPointF center = knob.center();
+  const qreal r = diameter / 2 - 2;
+  QPen glyphPen(glyph, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+  p.setPen(glyphPen);
+  if (isChecked()) {
+    p.drawLine(center + QPointF(-r, 0), center + QPointF(-r / 3, r * 0.7));
+    p.drawLine(center + QPointF(-r / 3, r * 0.7), center + QPointF(r, -r * 0.7));
+  } else {
+    p.drawLine(center + QPointF(-r * 0.7, -r * 0.7), center + QPointF(r * 0.7, r * 0.7));
+    p.drawLine(center + QPointF(r * 0.7, -r * 0.7), center + QPointF(-r * 0.7, r * 0.7));
+  }
+}
+ElidedLabel::ElidedLabel(const QString &label, QWidget *parent)
+    : QLabel(label, parent), m_fullText(label) {
+  setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+  setTextInteractionFlags(Qt::TextSelectableByMouse);
+}
+void ElidedLabel::setText(const QString &label) {
+  m_fullText = label;
+  refresh();
+}
+QSize ElidedLabel::minimumSizeHint() const {
+  return {QFontMetrics(font()).horizontalAdvance(QStringLiteral("…")), QLabel::sizeHint().height()};
+}
+void ElidedLabel::resizeEvent(QResizeEvent *event) {
+  QLabel::resizeEvent(event);
+  refresh();
+}
+void ElidedLabel::refresh() {
+  // Before the first layout pass there is no width to elide into, and the full
+  // text is what size hints and tests need.
+  if (width() <= 0) {
+    QLabel::setText(m_fullText);
+    return;
+  }
+  QLabel::setText(fontMetrics().elidedText(m_fullText, Qt::ElideRight,
+                                           contentsRect().adjusted(1, 0, -1, 0).width()));
 }
 QString text(const char *zh, const char *en) {
   const QString language = QSettings().value("appearance/language", "system").toString();
@@ -314,6 +381,21 @@ QPushButton[soft=true], QPushButton[selected=true] { color: @accent@; background
 QPushButton[soft=true]:hover { background: @softHover@; }
 QPushButton[soft=true]:disabled { color: @muted@; background: @background@; }
 QPushButton[iconOnly=true] { padding: 6px; min-width: 18px; min-height: 18px; }
+QFrame#settingsProtocolColumn { background: transparent; border: none; border-right: 1px solid @border@; }
+QLabel[role=groupLabel] { color: @muted@; font-size: 11px; font-weight: 600; padding: 6px 8px 2px 8px; }
+QPushButton[role=protocolRow] { background: transparent; border: 1px solid transparent; color: @text@; text-align: left; padding: 5px 10px; border-radius: 7px; min-height: 16px; }
+QPushButton[role=protocolRow]:hover { background: @hover@; }
+QPushButton[role=protocolRow]:checked { background: @selected@; color: @accent@; font-weight: 600; }
+QFrame#appCard { background: @panel@; border: 1px solid @border@; border-radius: 10px; }
+QFrame#appCard:hover { border-color: @muted@; }
+QLabel[role=appIcon] { background: @background@; border: 1px solid @border@; border-radius: 8px; }
+QLabel[role=appName] { font-weight: 600; }
+QLabel[role=appBadge] { color: @accent@; background: @softAccent@; border-radius: 5px; font-weight: 600; }
+QLabel[role=appPath] { color: @muted@; background: @background@; border: 1px solid @border@; border-radius: 6px; font-size: 12px; }
+QToolButton#applicationCopyPath { background: transparent; border: none; border-radius: 5px; padding: 0; min-width: 0; min-height: 0; }
+QToolButton#applicationCopyPath:hover { background: @hover@; }
+QToolButton#applicationCopyPath:pressed { background: @selected@; }
+QLabel[role=appComment] { color: @muted@; font-size: 12px; }
 QListWidget#categories, QListWidget#settingsNavigation { background: transparent; border: none; outline: 0; }
 QListWidget#categories::item, QListWidget#settingsNavigation::item { padding: 0 10px; margin: 2px 0; border-radius: 7px; color: @text@; }
 QListWidget#categories::item:hover, QListWidget#settingsNavigation::item:hover { background: @hover@; }

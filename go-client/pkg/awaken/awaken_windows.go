@@ -363,6 +363,7 @@ func handleDB(r *Rouse, cfg *config.AppConfig) *exec.Cmd {
 	if r.Protocol == "sqlserver" && appItem.Name == "dbeaver" {
 		connectMap["protocol"] = "mssql_jdbc_ms_new"
 	}
+	applyDBXProtocol(connectMap, appItem.Name, r.Protocol)
 	if r.Protocol == "redis" && appItem.Name == "resp" {
 		var conList []map[string]string
 		ss := make(map[string]string)

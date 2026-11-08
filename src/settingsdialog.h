@@ -2,9 +2,11 @@
 #include <QDialog>
 #include <QJsonValue>
 class ConfigStore;
-class QTableWidget;
-class QComboBox;
+class QButtonGroup;
+class QJsonObject;
 class QLabel;
+class QVBoxLayout;
+class QWidget;
 class SettingsDialog : public QDialog {
   Q_OBJECT
 public:
@@ -17,10 +19,13 @@ protected:
   void showEvent(QShowEvent *event) override;
 
 private:
+  QString selectedProtocol() const;
+  QWidget *applicationCard(const QJsonObject &item, const QString &category,
+                           const QString &protocol);
   void reloadApplications();
   bool m_initialPlacement = true;
   ConfigStore *m_config;
-  QComboBox *m_protocol;
-  QTableWidget *m_applications;
+  QButtonGroup *m_protocolGroup = nullptr;
+  QVBoxLayout *m_applicationCards = nullptr;
   QLabel *m_applicationError;
 };

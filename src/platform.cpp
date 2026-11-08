@@ -275,6 +275,29 @@ bool ConfigStore::selectApplication(const QString &category, const QString &prot
     if (!save(config)) return false;
     emit changed(); return true;
 }
+bool ConfigStore::clearDefaultApplication(const QString &category, const QString &protocol) {
+    if (protocol.isEmpty()) { error_ = tr("未指定协议"); return false; }
+    QJsonObject config;
+    if (!load(config)) return false;
+    QJsonObject os = config.value(platformKey()).toObject();
+    QJsonArray items = os.value(category).toArray();
+    bool cleared = false;
+    for (int i = 0; i < items.size(); ++i) {
+        QJsonObject item = items.at(i).toObject();
+        const QJsonArray first = item.value("match_first").toArray();
+        QJsonArray kept;
+        for (const QJsonValue &value : first)
+            if (value.toString() != protocol) kept.append(value);
+        if (kept.size() == first.size()) continue;
+        item.insert("match_first", kept);
+        items.replace(i, item);
+        cleared = true;
+    }
+    if (!cleared) return true;
+    os.insert(category, items); config.insert(platformKey(), os);
+    if (!save(config)) return false;
+    emit changed(); return true;
+}
 
 Launcher::Launcher(QObject *parent, const QString &executable, const QString &config)
     : QObject(parent), executable_(executable), config_(config) {}
