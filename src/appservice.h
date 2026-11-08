@@ -9,6 +9,8 @@
 #include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
+#include <QThread>
+#include "networkworker.h"
 #include <functional>
 #include <vector>
 
@@ -18,6 +20,7 @@ class AppService : public QObject {
 public:
     using LookupResult = std::function<void(QJsonValue, QString)>;
     explicit AppService(QObject *parent = nullptr);
+    ~AppService() override;
     QString site() const { return m_site; }
     QString org() const { return m_org; }
     quint64 contextRevision() const { return m_orgGeneration; }
@@ -38,8 +41,6 @@ public:
     void rename(QString id, QString name);
     void connection(QJsonObject body, QJsonObject extra = QJsonObject());
     void metadata();
-    // Apply the proxy configuration from QSettings to the shared network manager.
-    // Call after construction and whenever the user changes proxy settings.
     void applyProxy();
 signals:
     void contextChanged();
@@ -61,7 +62,9 @@ private:
     friend class TestUi;
     using Result = std::function<void(QJsonValue, QString, int)>;
     using Ready = std::function<void(bool)>;
-    QNetworkAccessManager m_network;
+    QThread m_networkThread;
+    NetworkWorker *m_worker = nullptr;
+    QString m_proxyMode, m_proxyAddress;
     QTcpServer m_callback;
     QTimer m_loginTimer;
     QTimer m_sessionTimer;

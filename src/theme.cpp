@@ -361,7 +361,7 @@ QComboBox:on { border-color: @accent@; }
 QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: top right; border: none; width: 30px; }
 QComboBox::down-arrow { image: url(:/ui/chevron-down.svg); width: 14px; height: 14px; }
 QComboBox::down-arrow:on { image: url(:/ui/chevron-up.svg); }
-QComboBox QAbstractItemView { background: @panel@; color: @text@; border: 1px solid @border@; border-radius: 8px; padding: 4px; outline: 0; selection-background-color: @softAccent@; selection-color: @text@; }
+QComboBox QAbstractItemView { background: @panel@; color: @text@; border: none; border-radius: 8px; padding: 4px; outline: 0; selection-background-color: @softAccent@; selection-color: @text@; }
 QComboBox QLineEdit { border: none; background: transparent; padding: 0; }
 QComboBox#organizationSelector { background: transparent; border: none; font-weight: 500; }
 QSpinBox::up-button, QSpinBox::down-button { border: none; background: transparent; width: 20px; }
@@ -382,7 +382,7 @@ QPushButton[soft=true]:hover { background: @softHover@; }
 QPushButton[soft=true]:disabled { color: @muted@; background: @background@; }
 QPushButton[iconOnly=true] { padding: 6px; min-width: 18px; min-height: 18px; }
 QFrame#settingsProtocolColumn { background: transparent; border: none; border-right: 1px solid @border@; }
-QLabel[role=groupLabel] { color: @muted@; font-size: 11px; font-weight: 600; padding: 6px 8px 2px 8px; }
+QLabel[role=groupLabel] { color: @muted@; font-size: 11px; font-weight: 600; padding: 4px 8px; }
 QPushButton[role=protocolRow] { background: transparent; border: 1px solid transparent; color: @text@; text-align: left; padding: 5px 10px; border-radius: 7px; min-height: 16px; }
 QPushButton[role=protocolRow]:hover { background: @hover@; }
 QPushButton[role=protocolRow]:checked { background: @selected@; color: @accent@; font-weight: 600; }
@@ -438,7 +438,7 @@ QScrollBar::handle:disabled { background: transparent; }
 QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; border: none; background: transparent; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 QAbstractScrollArea::corner { background: transparent; border: none; }
-QMenu { color: @text@; background: @panel@; border: 1px solid @border@; padding: 5px; }
+QMenu { color: @text@; background: @panel@; border: none; padding: 5px; }
 QMenu::item { padding: 7px 24px 7px 14px; border-radius: 5px; }
 QMenu::item:selected { background: @hover@; }
 QMenu::right-arrow { image: url(:/ui/chevron-right.svg); width: 14px; height: 14px; }

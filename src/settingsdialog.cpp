@@ -28,6 +28,8 @@
 #include <QPair>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QScrollBar>
+#include <QSignalBlocker>
 #include <QSettings>
 #include <QShowEvent>
 #include <QTimer>
@@ -163,9 +165,12 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
   tabs->tabBar()->hide();
   tabs->setDocumentMode(true);
   body->addWidget(tabs, 1);
-  auto addPage = [tabs, navigation](QWidget *content, const QString &title,
-                                    const QString &description,
+  auto addPage = [this, tabs, navigation](QWidget *content, const char *titleZh,
+                                    const char *titleEn, const char *descriptionZh,
+                                    const char *descriptionEn,
                                     bool stretch = false) {
+    const QString title = text(titleZh, titleEn);
+    const QString description = text(descriptionZh, descriptionEn);
     auto *page = new QWidget;
     page->setObjectName("settingsPage");
     auto *pageLayout = new QVBoxLayout(page);
@@ -191,6 +196,15 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
     scroll->setWidget(page);
     tabs->addTab(scroll, title);
     auto *item = new QListWidgetItem(title, navigation);
+    m_translations.append([tabs, scroll, item, titleLabel, descriptionLabel,
+                           titleZh, titleEn, descriptionZh, descriptionEn] {
+      const QString translated = text(titleZh, titleEn);
+      item->setText(translated);
+      item->setToolTip(translated);
+      tabs->setTabText(tabs->indexOf(scroll), translated);
+      titleLabel->setText(translated);
+      descriptionLabel->setText(text(descriptionZh, descriptionEn));
+    });
     const QStringList icons{"settings", "palette", "desktop", "app", "info"};
     item->setIcon(ClientTheme::icon(icons.value(navigation->count() - 1)));
     item->setSizeHint(QSize(140, 40));
@@ -250,18 +264,18 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
     return check;
   };
   auto *general = new QFrame;
+  general->setObjectName("generalSettingsForm");
   auto *g = new QFormLayout(general);
   styleForm(g);
-  addPage(general, text("通用", "General"),
-          text("语言、终端与桌面行为。",
-               "Language, terminal and desktop preferences."));
+  addPage(general, "通用", "General", "语言、终端与桌面行为。",
+          "Language, terminal and desktop preferences.");
   auto *language = addChoice(g, text("语言", "Language"), "appearance/language",
                              {{text("跟随系统", "System"), "system"},
                               {"简体中文", "zh"},
                               {"English", "en"}},
                              "system");
-  language->setToolTip(text("重新打开设置后应用新的设置页语言。",
-                            "Reopen settings to update this page’s language."));
+  connect(language, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+          [this] { retranslateUi(); });
   addChoice(g, text("字符集", "Character set"), "connection/charset",
             {{text("默认", "Default"), "default"},
              {"UTF-8", "utf8"},
@@ -277,64 +291,39 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
             "quit");
   addBool(g, text("下次启动恢复登录", "Restore login on startup"),
           "general/restoreLogin", true);
-  auto *proxyGroup = new QGroupBox(text("代理", "Proxy"), general);
-  auto *pg = new QFormLayout(proxyGroup);
-  styleForm(pg);
-  auto *proxyMode = addChoice(pg, text("模式", "Mode"), "proxy/mode",
-                             {{text("关闭", "Off"), "none"},
-                              {text("系统代理", "System proxy"), "system"},
-                              {text("手动", "Manual"), "manual"}},
-                             "none");
+  auto *proxyHeader = new QLabel(text("代理", "Proxy"), general);
+  proxyHeader->setProperty("role", "groupLabel");
+  g->addRow(proxyHeader);
+  auto *proxyMode = addChoice(g, text("模式", "Mode"), "proxy/mode",
+                             {{text("系统代理", "System proxy"), "system"},
+                              {text("手动", "Manual"), "manual"},
+                              {text("关闭", "Off"), "none"}},
+                             "system");
   auto *proxyUrl = new QLineEdit(this);
   proxyUrl->setObjectName("proxyHttp");
   proxyUrl->setPlaceholderText(text("http://proxy.example.com:8080",
                                     "http://proxy.example.com:8080"));
   proxyUrl->setText(QSettings().value("proxy/http").toString());
-  pg->addRow(text("地址", "Address"), proxyUrl);
-  alignField(pg, proxyUrl);
-  auto *proxyUser = new QLineEdit(this);
-  proxyUser->setObjectName("proxyUsername");
-  proxyUser->setText(QSettings().value("proxy/username").toString());
-  pg->addRow(text("用户名", "Username"), proxyUser);
-  alignField(pg, proxyUser);
-  auto *proxyPassword = new QLineEdit(this);
-  proxyPassword->setObjectName("proxyPassword");
-  proxyPassword->setEchoMode(QLineEdit::Password);
-  proxyPassword->setPlaceholderText(text("留空则不保存密码", "Empty to skip saving"));
-  pg->addRow(text("密码", "Password"), proxyPassword);
-  alignField(pg, proxyPassword);
+  g->addRow(text("地址", "Address"), proxyUrl);
+  alignField(g, proxyUrl);
   connect(proxyMode, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-          [this, proxyMode, proxyUrl, proxyUser, proxyPassword] {
-            const bool manual = proxyMode->currentData() == "manual";
-            proxyUrl->setEnabled(manual);
-            proxyUser->setEnabled(manual);
-            proxyPassword->setEnabled(manual);
+          [this, proxyMode, proxyUrl] {
+            proxyUrl->setEnabled(proxyMode->currentData() == "manual");
           });
   const bool manualInitially = proxyMode->currentData() == "manual";
   proxyUrl->setEnabled(manualInitially);
-  proxyUser->setEnabled(manualInitially);
-  proxyPassword->setEnabled(manualInitially);
-  auto persistProxy = [this, proxyMode, proxyUrl, proxyUser, proxyPassword] {
+  auto persistProxy = [this, proxyMode, proxyUrl] {
     QSettings().setValue("proxy/mode", proxyMode->currentData());
     QSettings().setValue("proxy/http", proxyUrl->text().trimmed());
-    QSettings().setValue("proxy/username", proxyUser->text().trimmed());
-    if (!proxyPassword->text().isEmpty()) {
-      // Keep the secret in the OS credential store instead of plaintext settings.
-      QString error;
-      CredentialStore::write("proxy-" + proxyUser->text().trimmed(),
-                            proxyPassword->text().toUtf8(), &error);
-    }
     emit preferencesChanged();
   };
   connect(proxyUrl, &QLineEdit::editingFinished, this, persistProxy);
-  connect(proxyUser, &QLineEdit::editingFinished, this, persistProxy);
-  connect(proxyPassword, &QLineEdit::editingFinished, this, persistProxy);
   auto *appearance = new QFrame;
+  appearance->setObjectName("appearanceSettingsForm");
   auto *a = new QFormLayout(appearance);
   styleForm(a);
-  addPage(appearance, text("外观", "Appearance"),
-          text("选择适合你的主题、字体与强调色。",
-               "Choose your theme, typeface and accent colors."));
+  addPage(appearance, "外观", "Appearance", "选择适合你的主题、字体与强调色。",
+          "Choose your theme, typeface and accent colors.");
   addChoice(a, text("主题", "Theme"), "appearance/theme",
             {{text("跟随系统", "System"), "system"},
              {text("浅色", "Light"), "light"},
@@ -382,12 +371,11 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
     });
   }
   auto *remote = new QFrame;
+  remote->setObjectName("remoteSettingsForm");
   auto *r = new QFormLayout(remote);
   styleForm(r);
-  addPage(
-      remote, text("远程桌面", "Remote desktop"),
-      text("调整桌面显示与重定向选项。",
-           "Adjust the display and redirection options for remote sessions."));
+  addPage(remote, "远程桌面", "Remote desktop", "调整桌面显示与重定向选项。",
+          "Adjust the display and redirection options for remote sessions.");
   addChoice(r, text("分辨率", "Resolution"), "connection/rdpResolution",
             {{text("自动", "Auto"), "auto"},
              {"1024×768", "1024x768"},
@@ -458,10 +446,9 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
   auto *al = new QHBoxLayout(apps);
   al->setContentsMargins(0, 0, 0, 0);
   al->setSpacing(0);
-  addPage(apps, text("本地应用", "Applications"),
-          text("先选择连接协议，再为它指定默认客户端或已安装的应用。",
-               "Pick a connection protocol, then choose its default client or "
-               "point to an installed application."),
+  addPage(apps, "本地应用", "Applications",
+          "先选择连接协议，再为它指定默认客户端或已安装的应用。",
+          "Pick a connection protocol, then choose its default client or point to an installed application.",
           true);
   const QJsonObject platformApplications = m_config->applications();
   auto *protocolColumn = new QWidget(apps);
@@ -492,6 +479,7 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
     heading->setSpacing(6);
     auto *headingIcon = new QLabel(protocolColumn);
     headingIcon->setFixedSize(14, 14);
+    headingIcon->setAlignment(Qt::AlignCenter);
     headingIcon->setPixmap(ClientTheme::icon(section.icon).pixmap(QSize(14, 14)));
     heading->addWidget(headingIcon, 0, Qt::AlignVCenter);
     auto *headingLabel =
@@ -499,7 +487,9 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
                         section.titleEn.toUtf8().constData()),
                    protocolColumn);
     headingLabel->setProperty("role", "groupLabel");
-    heading->addWidget(headingLabel, 1);
+    headingLabel->setProperty("sectionCategory", section.category);
+    headingLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    heading->addWidget(headingLabel, 1, Qt::AlignVCenter);
     pc->addLayout(heading);
     for (const auto &entry : protocols) {
       auto *button = new QPushButton(entry.second, protocolColumn);
@@ -552,12 +542,12 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
     firstProtocol->setChecked(true);
   reloadApplications();
   auto *about = new QFrame;
+  about->setObjectName("aboutSettings");
   auto *ab = new QVBoxLayout(about);
   ab->setContentsMargins(28, 32, 28, 32);
   ab->setSpacing(14);
   ab->addStretch();
-  addPage(about, text("关于", "About"),
-          text("OSMClient 桌面客户端。", "The OSMClient desktop client."), true);
+  addPage(about, "关于", "About", "OSMClient 桌面客户端。", "The OSMClient desktop client.", true);
   auto *logo = new QLabel(about);
   logo->setObjectName("aboutLogo");
   logo->setPixmap(QIcon(":/icons/icon.png").pixmap(56, 56));
@@ -603,6 +593,78 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
   connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
   footerLayout->addWidget(buttons);
   layout->addWidget(footer);
+}
+void SettingsDialog::retranslateUi() {
+  setWindowTitle(text("设置", "Settings"));
+  auto *sidebar = findChild<QFrame *>("settingsSidebar");
+  for (auto *label : sidebar->findChildren<QLabel *>())
+    if (label->property("role") == "dialogTitle") label->setText(text("设置", "Settings"));
+  for (const auto &translate : m_translations) translate();
+  auto *general = findChild<QFrame *>("generalSettingsForm");
+  auto *appearance = findChild<QFrame *>("appearanceSettingsForm");
+  auto *remote = findChild<QFrame *>("remoteSettingsForm");
+  auto updateRows = [](QFrame *frame, const QStringList &labels) {
+    auto *form = qobject_cast<QFormLayout *>(frame->layout());
+    for (int index = 0; index < labels.size(); ++index) {
+      auto *item = form->itemAt(index, QFormLayout::LabelRole);
+      if (!item) item = form->itemAt(index, QFormLayout::SpanningRole);
+      if (item) if (auto *label = qobject_cast<QLabel *>(item->widget())) label->setText(labels[index]);
+    }
+  };
+  updateRows(general, {text("语言", "Language"), text("字符集", "Character set"),
+      text("退格键发送 Ctrl+H", "Backspace sends Ctrl+H"), text("关闭主窗口", "Close main window"),
+      text("下次启动恢复登录", "Restore login on startup"), text("代理", "Proxy"),
+      text("模式", "Mode"), text("地址", "Address")});
+  updateRows(appearance, {text("主题", "Theme"), text("字体", "Font"), text("字号", "Font size"),
+      text("浅色主题色", "Light accent"), text("深色主题色", "Dark accent")});
+  updateRows(remote, {text("分辨率", "Resolution"), text("色彩质量", "Color quality"),
+      text("智能缩放", "Smart sizing"), text("键盘布局", "Keyboard layout"),
+      text("全屏", "Full screen"), text("多显示器", "Multiple monitors"), text("磁盘映射", "Drive redirection")});
+  for (auto *button : appearance->findChildren<QPushButton *>())
+    button->setText(text("选择颜色…", "Choose color…"));
+  auto updateChoices = [this](const QString &key, const QList<QPair<QString, QString>> &choices) {
+    auto *combo = findChild<QComboBox *>(key);
+    const QSignalBlocker blocker(combo);
+    for (const auto &choice : choices) {
+      const int index = combo->findData(choice.first);
+      if (index >= 0) combo->setItemText(index, choice.second);
+    }
+  };
+  updateChoices("appearance/language", {{"system", text("跟随系统", "System")}});
+  updateChoices("connection/charset", {{"default", text("默认", "Default")}});
+  updateChoices("general/closeAction", {{"quit", text("退出", "Quit")}, {"tray", text("最小化到托盘", "Hide to tray")}});
+  updateChoices("proxy/mode", {{"system", text("系统代理", "System proxy")}, {"manual", text("手动", "Manual")}, {"none", text("关闭", "Off")}});
+  updateChoices("appearance/theme", {{"system", text("跟随系统", "System")}, {"light", text("浅色", "Light")}, {"dark", text("深色", "Dark")}});
+  updateChoices("connection/rdpResolution", {{"auto", text("自动", "Auto")}});
+  updateChoices("connection/rdpSmartSize", {{"0", text("关闭", "Off")}, {"1", text("开启", "On")}});
+  auto *keyboard = findChild<QComboBox *>("connection/keyboardLayout");
+  const QStringList chinese{"美国英语 (QWERTY)", "英国英语 (QWERTY)", "日语 (QWERTY)", "法语 (AZERTY)", "瑞士法语 (QWERTZ)", "比利时法语 (AZERTY)", "土耳其语 Q (QWERTY)", "西班牙语", "拉丁美洲西班牙语", "德语 (QWERTZ)", "瑞士德语 (QWERTZ)", "瑞典语 (QWERTY)", "意大利语 (QWERTY)", "葡萄牙语 (QWERTY)", "巴西葡萄牙语 (QWERTY)", "波兰语 (QWERTY)", "匈牙利语 (QWERTZ)", "挪威语 (QWERTY)", "罗马尼亚语 (QWERTY)", "丹麦语 (QWERTY)", "加拿大法语 (QWERTY)"};
+  const QStringList english{"US English (QWERTY)", "UK English (QWERTY)", "Japanese (QWERTY)", "French (AZERTY)", "Swiss French (QWERTZ)", "Belgian French (AZERTY)", "Turkish-Q (QWERTY)", "Spanish", "Spanish (Latin American)", "German (QWERTZ)", "Swiss German (QWERTZ)", "Swedish (QWERTY)", "Italian (QWERTY)", "Portuguese (QWERTY)", "Brazilian Portuguese (QWERTY)", "Polish (QWERTY)", "Hungarian (QWERTZ)", "Norwegian (QWERTY)", "Romanian (QWERTY)", "Danish (QWERTY)", "Canadian French (QWERTY)"};
+  {
+    const QSignalBlocker blocker(keyboard);
+    for (int index = 0; index < keyboard->count(); ++index) {
+      const QString value = keyboard->itemData(index).toString();
+      const QString label = index < chinese.size() ? text(chinese[index].toUtf8().constData(), english[index].toUtf8().constData())
+          : value.isEmpty() ? text("未指定（已保存）", "Unspecified (saved)") : text("已保存的布局：", "Saved layout: ") + value;
+      keyboard->setItemText(index, label);
+      keyboard->setItemData(index, label + "\n" + value, Qt::ToolTipRole);
+    }
+  }
+  for (auto *label : findChildren<QLabel *>()) {
+    const QString category = label->property("sectionCategory").toString();
+    for (const auto &section : protocolSections())
+      if (!category.isEmpty() && section.category == category)
+        label->setText(text(section.titleZh.toUtf8().constData(), section.titleEn.toUtf8().constData()));
+  }
+  auto *about = findChild<QFrame *>("aboutSettings");
+  for (auto *button : about->findChildren<QPushButton *>()) button->setText(text("下载客户端", "Download client"));
+  auto *footer = findChild<QFrame *>("dialogFooter");
+  for (auto *label : footer->findChildren<QLabel *>()) label->setText(text("更改会自动保存", "Changes are saved automatically"));
+  footer->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Close)->setText(text("关闭", "Close"));
+  auto *cardScroll = findChild<QScrollArea *>("applicationCardScroll");
+  const int scrollValue = cardScroll->verticalScrollBar()->value();
+  reloadApplications();
+  cardScroll->verticalScrollBar()->setValue(scrollValue);
 }
 void SettingsDialog::showEvent(QShowEvent *event) {
   QDialog::showEvent(event);

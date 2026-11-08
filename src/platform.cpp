@@ -2,9 +2,11 @@
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLocalServer>
@@ -15,9 +17,15 @@
 #include <QStandardPaths>
 #include <QSysInfo>
 #include <QTimer>
+#include <QHostAddress>
+#include <QRegularExpression>
+#include <QNetworkProxyFactory>
+#include <QNetworkProxyQuery>
+#include <QThread>
 
 #ifdef Q_OS_MACOS
 #include <CoreFoundation/CoreFoundation.h>
+#include <CFNetwork/CFProxySupport.h>
 #include <Security/Security.h>
 #elif defined(Q_OS_WIN)
 #ifndef NOMINMAX
@@ -57,6 +65,215 @@ const SecretSchema CredentialSchema = {
     "com.jumpserver.client-qt.auth", SECRET_SCHEMA_NONE,
     {{"key", SECRET_SCHEMA_ATTRIBUTE_STRING}, {nullptr, SECRET_SCHEMA_ATTRIBUTE_STRING}}
 };
+#endif
+}
+
+namespace {
+QRegularExpression wildcardExpression(const QString &pattern)
+{
+    // Translate the system's wildcard syntax directly instead of relying on
+    // QRegExp (removed in Qt 6) so Qt 5 and Qt 6 builds behave the same.
+    QString escaped;
+    escaped.reserve(pattern.size() * 2);
+    for (const QChar ch : pattern) {
+        if (ch == QLatin1Char('*'))
+            escaped += QStringLiteral(".*");
+        else
+            escaped += QRegularExpression::escape(QString(ch));
+    }
+    return QRegularExpression(QStringLiteral("\\A") + escaped + QStringLiteral("\\z"),
+                              QRegularExpression::CaseInsensitiveOption);
+}
+bool hostExcludedImpl(const QString &host, const QStringList &patterns, bool excludeSimpleHostnames)
+{
+    if (host.isEmpty()) return true;
+    if (excludeSimpleHostnames && !host.contains(QLatin1Char('.')) && !host.contains(QLatin1Char(':')))
+        return true;
+    QHostAddress address;
+    const bool isIp = address.setAddress(host);
+    for (const QString &rawPattern : patterns) {
+        const QString pattern = rawPattern.trimmed();
+        if (pattern.isEmpty()) continue;
+        if (isIp) {
+            // An entry may be a bare IP or a CIDR subnet; both mean "direct".
+            const auto subnet = QHostAddress::parseSubnet(pattern);
+            if (subnet.first.isNull() || subnet.second < 0) {
+                if (address == QHostAddress(pattern)) return true;
+            } else if (address.isInSubnet(subnet)) {
+                return true;
+            }
+        }
+        if (wildcardExpression(pattern).match(host).hasMatch()) return true;
+    }
+    return false;
+}
+#ifdef Q_OS_MACOS
+QString cfString(CFDictionaryRef dict, CFStringRef key)
+{
+    auto *value = static_cast<CFStringRef>(CFDictionaryGetValue(dict, key));
+    return value ? QString::fromCFString(value) : QString();
+}
+bool cfEnabled(CFDictionaryRef dict, CFStringRef key)
+{
+    auto *value = static_cast<CFNumberRef>(CFDictionaryGetValue(dict, key));
+    int enabled = 0;
+    return value && CFNumberGetValue(value, kCFNumberIntType, &enabled) && enabled;
+}
+QNetworkProxy proxyFromDictionary(CFDictionaryRef dict)
+{
+    auto *type = static_cast<CFStringRef>(CFDictionaryGetValue(dict, kCFProxyTypeKey));
+    if (!type) return QNetworkProxy(QNetworkProxy::DefaultProxy);
+    if (type && CFStringCompare(type, kCFProxyTypeNone, 0) == kCFCompareEqualTo)
+        return QNetworkProxy(QNetworkProxy::NoProxy);
+    QNetworkProxy::ProxyType kind = QNetworkProxy::DefaultProxy;
+    if (CFStringCompare(type, kCFProxyTypeHTTP, 0) == kCFCompareEqualTo ||
+        CFStringCompare(type, kCFProxyTypeHTTPS, 0) == kCFCompareEqualTo)
+        kind = QNetworkProxy::HttpProxy;
+    else if (CFStringCompare(type, kCFProxyTypeSOCKS, 0) == kCFCompareEqualTo)
+        kind = QNetworkProxy::Socks5Proxy;
+    else if (CFStringCompare(type, kCFProxyTypeFTP, 0) == kCFCompareEqualTo)
+        kind = QNetworkProxy::FtpCachingProxy;
+    else
+        return QNetworkProxy(QNetworkProxy::DefaultProxy);
+    int port = 0;
+    if (auto *number = static_cast<CFNumberRef>(CFDictionaryGetValue(dict, kCFProxyPortNumberKey)))
+        CFNumberGetValue(number, kCFNumberIntType, &port);
+    return QNetworkProxy(kind, cfString(dict, kCFProxyHostNameKey), quint16(port));
+}
+QList<QNetworkProxy> manualProxies(CFDictionaryRef dict, const QString &scheme)
+{
+    QList<QNetworkProxy> proxies;
+    const bool secure = scheme == QStringLiteral("https");
+    CFStringRef enable = secure ? kCFNetworkProxiesHTTPSEnable : kCFNetworkProxiesHTTPEnable;
+    CFStringRef host = secure ? kCFNetworkProxiesHTTPSProxy : kCFNetworkProxiesHTTPProxy;
+    CFStringRef portKey = secure ? kCFNetworkProxiesHTTPSPort : kCFNetworkProxiesHTTPPort;
+    if (cfEnabled(dict, enable)) {
+        const QString name = cfString(dict, host);
+        int port = 0;
+        if (auto *number = static_cast<CFNumberRef>(CFDictionaryGetValue(dict, portKey)))
+            CFNumberGetValue(number, kCFNumberIntType, &port);
+        if (!name.isEmpty() && port > 0 && port <= 65535) {
+            proxies.append(QNetworkProxy(QNetworkProxy::HttpProxy, name, quint16(port)));
+        }
+    }
+    if (cfEnabled(dict, kCFNetworkProxiesSOCKSEnable)) {
+        const QString name = cfString(dict, kCFNetworkProxiesSOCKSProxy);
+        int port = 0;
+        if (auto *number = static_cast<CFNumberRef>(CFDictionaryGetValue(dict, kCFNetworkProxiesSOCKSPort)))
+            CFNumberGetValue(number, kCFNumberIntType, &port);
+        if (!name.isEmpty() && port > 0 && port <= 65535) {
+            proxies.append(QNetworkProxy(QNetworkProxy::Socks5Proxy, name, quint16(port)));
+        }
+    }
+    return proxies;
+}
+struct PacContext {
+    QList<QNetworkProxy> proxies;
+    bool done = false;
+    // False when the callback reported an error or returned no proxy list;
+    // a default-constructed proxy must never be mistaken for "DIRECT".
+    bool answered = false;
+};
+void pacCallback(void *client, CFArrayRef proxylist, CFErrorRef error)
+{
+    auto *context = static_cast<PacContext *>(client);
+    context->done = true;
+    if (!error && proxylist && CFArrayGetCount(proxylist) > 0) {
+        for (CFIndex index = 0; index < CFArrayGetCount(proxylist); ++index) {
+            const auto proxy = proxyFromDictionary(static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(proxylist, index)));
+            if (proxy.type() != QNetworkProxy::DefaultProxy) context->proxies.append(proxy);
+        }
+        context->answered = !context->proxies.isEmpty();
+    }
+}
+// Outcome of a PAC evaluation. A successful PAC that answers DIRECT must not be
+// confused with a broken PAC, otherwise the manual proxy would override it.
+enum class PacResult { Failed, Direct, Proxied };
+PacResult runPac(const QString &location, const QUrl &url, QList<QNetworkProxy> &proxies)
+{
+    const QByteArray encodedUrl = url.toEncoded();
+    if (encodedUrl.isEmpty()) return PacResult::Failed;
+    const QByteArray locationUtf8 = location.toUtf8();
+    auto cfLocationString = CFStringCreateWithBytes(nullptr, reinterpret_cast<const UInt8 *>(locationUtf8.constData()),
+                                                    locationUtf8.size(), kCFStringEncodingUTF8, false);
+    if (!cfLocationString) return PacResult::Failed;
+    auto cfLocation = CFURLCreateWithString(nullptr, cfLocationString, nullptr);
+    CFRelease(cfLocationString);
+    if (!cfLocation) return PacResult::Failed;
+    auto target = CFURLCreateWithBytes(nullptr, reinterpret_cast<const UInt8 *>(encodedUrl.constData()),
+                                       encodedUrl.size(), kCFStringEncodingUTF8, nullptr);
+    if (!target) { CFRelease(cfLocation); return PacResult::Failed; }
+    PacContext context;
+    CFStreamClientContext clientContext{0, &context, nullptr, nullptr, nullptr};
+    auto source = CFNetworkExecuteProxyAutoConfigurationURL(cfLocation, target, &pacCallback, &clientContext);
+    CFRelease(cfLocation);
+    CFRelease(target);
+    if (!source) return PacResult::Failed;
+    static CFStringRef mode = CFSTR("osmProxyResolve");
+    CFRunLoopAddSource(CFRunLoopGetCurrent(), source, mode);
+    const auto deadline = CFAbsoluteTimeGetCurrent() + 10.0;
+    while (!context.done && CFAbsoluteTimeGetCurrent() < deadline &&
+           !QThread::currentThread()->isInterruptionRequested())
+        CFRunLoopRunInMode(mode, 0.05, true);
+    CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, mode);
+    CFRunLoopSourceInvalidate(source);
+    CFRelease(source);
+    if (!context.done || !context.answered) return PacResult::Failed;
+    proxies = context.proxies;
+    return proxies.first().type() == QNetworkProxy::NoProxy ? PacResult::Direct : PacResult::Proxied;
+}
+#endif
+} // namespace
+
+bool SystemProxy::hostExcluded(const QString &host, const QStringList &patterns,
+                               bool excludeSimpleHostnames)
+{
+    return hostExcludedImpl(host, patterns, excludeSimpleHostnames);
+}
+
+QList<QNetworkProxy> SystemProxy::resolve(const QUrl &url, QString *failure)
+{
+    if (failure) failure->clear();
+#ifdef Q_OS_MACOS
+    CFDictionaryRef dict = CFNetworkCopySystemProxySettings();
+    if (!dict) {
+        if (failure) *failure = QObject::tr("无法读取系统代理配置");
+        return {};
+    }
+    struct SettingsGuard {
+        CFDictionaryRef value;
+        ~SettingsGuard() { CFRelease(value); }
+    } guard{dict};
+    // Prefer an exact PAC result, but never let a broken PAC script mask the
+    // manually configured proxy: Qt returns no proxy in that case, which
+    // silently turns "system proxy" into a direct connection.
+    const QString pac = cfString(dict, kCFNetworkProxiesProxyAutoConfigURLString).trimmed();
+    const bool pacEnabled = cfEnabled(dict, kCFNetworkProxiesProxyAutoConfigEnable) && !pac.isEmpty();
+    QStringList patterns;
+    if (auto *exceptions = static_cast<CFArrayRef>(
+            CFDictionaryGetValue(dict, kCFNetworkProxiesExceptionsList))) {
+        for (CFIndex i = 0; i < CFArrayGetCount(exceptions); ++i) {
+            if (auto *item = static_cast<CFStringRef>(CFArrayGetValueAtIndex(exceptions, i)))
+                patterns.append(QString::fromCFString(item));
+        }
+    }
+    const bool excludeSimple =
+        cfEnabled(dict, kCFNetworkProxiesExcludeSimpleHostnames);
+    if (hostExcludedImpl(url.host(), patterns, excludeSimple)) {
+        return {QNetworkProxy(QNetworkProxy::NoProxy)};
+    }
+    const auto manual = manualProxies(dict, url.scheme());
+    if (pacEnabled) {
+        QList<QNetworkProxy> proxies;
+        if (runPac(pac, url, proxies) != PacResult::Failed) return proxies;
+        if (!manual.isEmpty()) return manual;
+        if (failure) *failure = QObject::tr("系统 PAC 代理解析失败，请检查自动代理配置");
+        return {};
+    }
+    if (!manual.isEmpty()) return manual;
+    return {QNetworkProxy(QNetworkProxy::NoProxy)};
+#else
+    return QNetworkProxyFactory::systemProxyForQuery(QNetworkProxyQuery(url));
 #endif
 }
 

@@ -138,12 +138,12 @@ QString connectionFailureReason(const QByteArray &bytes)
 }
 }
 
-AppService::AppService(QObject *parent) : QObject(parent), m_network(this), m_callback(this)
+AppService::AppService(QObject *parent) : QObject(parent), m_callback(this)
 {
-    // Match the original client: allow private/self-signed site certificates.
-    // Scope this policy to our site requests; TLS transport errors still fail.
-    connect(&m_network, &QNetworkAccessManager::sslErrors, this,
-        [](QNetworkReply *reply, const QList<QSslError> &) { reply->ignoreSslErrors(); });
+    m_worker = new NetworkWorker;
+    m_worker->moveToThread(&m_networkThread);
+    connect(&m_networkThread, &QThread::finished, m_worker, &QObject::deleteLater);
+    m_networkThread.start();
     m_loginTimer.setSingleShot(true);
     m_loginTimer.setInterval(5 * 60 * 1000);
     connect(&m_loginTimer, &QTimer::timeout, this, [this] { failLogin(tr("登录超时，请重试")); });
@@ -191,38 +191,18 @@ QString AppService::credentialKey() const
 {
     return QStringLiteral("oauth-") + QString::fromLatin1(QCryptographicHash::hash(m_site.toUtf8(), QCryptographicHash::Sha256).toHex());
 }
+AppService::~AppService()
+{
+    m_networkThread.requestInterruption();
+    m_networkThread.quit();
+    m_networkThread.wait();
+}
 void AppService::applyProxy() {
     const QSettings settings;
-    const QString mode = settings.value("proxy/mode", "none").toString();
-    if (mode == QStringLiteral("system")) {
-        // Honor the platform/system proxy configuration (PAC or environment).
-        QNetworkProxyFactory::setUseSystemConfiguration(true);
-        m_network.setProxy(QNetworkProxy(QNetworkProxy::DefaultProxy));
-        return;
-    }
-    QNetworkProxyFactory::setUseSystemConfiguration(false);
-    if (mode != QStringLiteral("manual")) {
-        m_network.setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
-        return;
-    }
-    const QString raw = settings.value("proxy/http").toString().trimmed();
-    const QUrl url(raw);
-    if (!url.isValid() || url.host().isEmpty()) {
-        m_network.setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
-        return;
-    }
-    QNetworkProxy proxy(QNetworkProxy::HttpProxy, url.host(),
-                       static_cast<quint16>(url.port() == -1 ? 8080 : url.port()));
-    const QString username = settings.value("proxy/username").toString();
-    if (!username.isEmpty()) {
-        proxy.setUser(username);
-        // Read the secret from the OS credential store when available, falling
-        // back to an empty password rather than persisting it in plaintext.
-        QString password;
-        CredentialStore::read("proxy-" + username, &password);
-        proxy.setPassword(password);
-    }
-    m_network.setProxy(proxy);
+    QString mode = settings.value("proxy/mode", "system").toString().trimmed();
+    if (mode != "manual" && mode != "none") mode = QStringLiteral("system");
+    m_proxyMode = mode;
+    m_proxyAddress = settings.value("proxy/http").toString().trimmed();
 }
 
 bool AppService::configureSite(QString site)
@@ -254,6 +234,10 @@ void AppService::setLoginPending(bool pending)
 void AppService::resetSession()
 {
     ++m_generation; ++m_assetRequest; ++m_orgGeneration;
+    const auto generation = m_generation;
+    QMetaObject::invokeMethod(m_worker, [worker = m_worker, generation] {
+        worker->cancelBefore(generation);
+    }, Qt::QueuedConnection);
     clearPendingLogin();
     m_sessionTimer.stop();
     m_access.clear(); m_refresh.clear(); m_clientId.clear(); m_org.clear(); m_expires = 0;
@@ -288,6 +272,7 @@ void AppService::login(QString site, bool loopback)
     // Switching identities invalidates in-flight replies before contacting the next site.
     const QString oldSite = m_site;
     if (!configureSite(site)) { m_site = oldSite; return; }
+    applyProxy();
     resetSession(); emit loggedOut(); setLoginPending(true);
     m_loginTimer.start(); emit status(tr("正在检查站点版本…"), true);
     request("GET", versionPath, {}, {}, {}, false,
@@ -407,6 +392,7 @@ void AppService::restore(QString site)
 {
     const QString oldSite = m_site;
     if (!configureSite(site)) { m_site = oldSite; return; }
+    applyProxy();
     resetSession(); emit loggedOut();
     setLoginPending(true); m_loginTimer.start();
     QString failure;
@@ -530,43 +516,47 @@ void AppService::request(const QByteArray &method, const QString &path, const QU
     if (auth) request.setRawHeader("Authorization", "Bearer " + m_access.toUtf8());
     if (auth && !m_org.isEmpty()) request.setRawHeader("X-JMS-ORG", m_org.toUtf8());
     const auto generation = m_generation;
-    // A custom GET with a QByteArray upload adds request-body framing that
-    // some gateways reject. GET endpoints must use Qt's body-free operation.
-    auto *reply = method == "GET" ? m_network.get(request)
-                                  : m_network.sendCustomRequest(request, method, body);
-    auto *timer = new QTimer(reply); timer->setSingleShot(true); timer->start(30000);
-    connect(timer, &QTimer::timeout, reply, &QNetworkReply::abort);
-    connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 received, qint64) {
-        if (received > 16 * 1024 * 1024) reply->abort();
-    });
-    connect(reply, &QNetworkReply::finished, this, [this, reply, generation, result, path] {
-        reply->deleteLater();
+    const auto completion = [this, generation, result, path](NetworkResult response) {
         if (generation != m_generation) return;
         if (checkSessionExpiry()) return;
-        const int code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (reply->error() != QNetworkReply::NoError || code < 200 || code >= 300) {
+        const int code = response.status;
+        if (!response.failure.isEmpty() || response.error != QNetworkReply::NoError || code < 200 || code >= 300) {
             // Do not surface arbitrary response bodies: they can contain credentials.
             QString failure;
-            if (code == 401) failure = tr("登录已过期，请重新登录（HTTP 401）");
+            if (!response.failure.isEmpty()) failure = response.failure;
+            else if (code == 401) failure = tr("登录已过期，请重新登录（HTTP 401）");
             else if (code == 403) failure = tr("操作被拒绝，请检查授权、访问控制或审批要求（HTTP 403）");
             else if (code > 0) failure = tr("站点请求失败（HTTP %1）").arg(code);
-            else if (reply->error() == QNetworkReply::SslHandshakeFailedError)
+            else if (response.error == QNetworkReply::SslHandshakeFailedError)
                 failure = tr("TLS 连接失败，请检查站点的 HTTPS 服务与协议配置");
+            else if (response.error >= QNetworkReply::ProxyConnectionRefusedError && response.error <= QNetworkReply::UnknownProxyError)
+                failure = tr("代理连接失败，请检查代理服务与认证配置");
+            else if (response.error == QNetworkReply::HostNotFoundError)
+                failure = tr("站点域名解析失败，请检查 DNS 与网络配置");
             else failure = tr("网络请求失败或超时，请检查网络与站点地址");
             if (code == 400 && path.startsWith("/api/v1/authentication/connection-token/")) {
-                const auto bytes = reply->read(65537);
+                const auto bytes = response.body.left(65537);
                 const auto reason = bytes.size() <= 65536 ? connectionFailureReason(bytes) : QString();
                 if (!reason.isEmpty()) failure = reason + tr("（HTTP 400）");
             }
             result({}, failure, code); return;
         }
-        const auto bytes = reply->readAll();
+        const auto bytes = response.body;
         if (bytes.trimmed().isEmpty()) { result({}, {}, code); return; }
         QJsonParseError parseError;
         const auto json = QJsonDocument::fromJson(bytes, &parseError);
         if (parseError.error != QJsonParseError::NoError) { result({}, tr("站点返回了无效 JSON"), code); return; }
         result(json.isArray() ? QJsonValue(json.array()) : QJsonValue(json.object()), {}, code);
-    });
+    };
+    auto *worker = m_worker;
+    const auto mode = m_proxyMode;
+    const auto address = m_proxyAddress;
+    QMetaObject::invokeMethod(worker, [this, worker, request, method, body, mode, address, generation, completion] {
+        worker->send(request, method, body, mode, address, generation,
+                     [this, completion](NetworkResult response) {
+            QMetaObject::invokeMethod(this, [completion, response] { completion(response); }, Qt::QueuedConnection);
+        });
+    }, Qt::QueuedConnection);
 }
 
 void AppService::api(const QByteArray &method, const QString &path, const QUrlQuery &query,

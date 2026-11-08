@@ -412,7 +412,12 @@ MainWindow::MainWindow(AppService *service, ConfigStore *config,
       m_restoring = false;
       updateSessionUi();
     }
+    const bool wasLoading = m_loading;
     m_loading = false;
+    if (wasLoading) {
+      renderAssets();
+      m_empty->setText(text("资产加载失败，请重试", "Failed to load assets. Please retry."));
+    }
     m_connectionInFlight = false;
     updateLoginState();
     m_pendingAsset = {};
@@ -753,7 +758,9 @@ void MainWindow::buildUi() {
   top->setSpacing(12);
   m_organizations = new ClientTheme::ComboBox;
   m_organizations->setObjectName("organizationSelector");
-  m_organizations->setMaximumWidth(180);
+  m_organizations->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+  m_organizations->setMinimumWidth(96);
+  m_organizations->setMaximumWidth(280);
   top->addWidget(m_organizations);
   connect(m_organizations, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
     if (index < 0) return;
@@ -1160,9 +1167,13 @@ void MainWindow::login() {
 void MainWindow::refresh(bool reset) {
   if (!m_service->authenticated())
     return;
+  m_searchTimer->stop();
   if (reset)
     m_offset = 0;
   m_loading = true;
+  m_assets = {};
+  m_count = 0;
+  renderAssets();
   m_refreshButton->setEnabled(false);
   m_previous->setEnabled(false);
   m_next->setEnabled(false);
@@ -1277,13 +1288,15 @@ void MainWindow::renderAssets() {
     connect(connectButton, &QPushButton::clicked, this,
             [this, asset] { requestConnection(asset); });
   }
-  m_empty->setText(
-      text("没有符合条件的授权资产", "No matching authorized assets"));
-  const bool empty = m_assets.isEmpty() && m_service->authenticated();
+  m_empty->setText(m_loading
+      ? text("正在加载 %1…", "Loading %1…").arg(categoryLabels().value(m_categories->currentRow()))
+      : text("没有符合条件的授权资产", "No matching authorized assets"));
+  const bool empty = (m_loading || m_assets.isEmpty()) && m_service->authenticated();
   m_views->setVisible(!empty);
   m_empty->setVisible(empty);
   const int size = m_pageSize ? m_pageSize->currentData().toInt() : 20;
-  m_pageLabel->setText(text("共 %1 项 · 第 %2 页", "%1 assets · Page %2")
+  m_pageLabel->setText(m_loading ? text("正在加载…", "Loading…")
+      : text("共 %1 项 · 第 %2 页", "%1 assets · Page %2")
                            .arg(m_count)
                            .arg(m_offset / qMax(1, size) + 1));
   m_previous->setEnabled(!m_loading && m_offset > 0);

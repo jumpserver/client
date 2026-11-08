@@ -1,6 +1,7 @@
 #pragma once
 #include <QDialog>
 #include <QJsonValue>
+#include <functional>
 class ConfigStore;
 class QButtonGroup;
 class QJsonObject;
@@ -19,6 +20,8 @@ protected:
   void showEvent(QShowEvent *event) override;
 
 private:
+  void retranslateUi();
+  QList<std::function<void()>> m_translations;
   QString selectedProtocol() const;
   QWidget *applicationCard(const QJsonObject &item, const QString &category,
                            const QString &protocol);

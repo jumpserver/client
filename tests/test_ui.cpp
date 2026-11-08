@@ -1016,24 +1016,19 @@ private slots:
     SettingsDialog dialog(&config, {}, nullptr);
     auto *mode = dialog.findChild<QComboBox *>("proxy/mode");
     auto *url = dialog.findChild<QLineEdit *>("proxyHttp");
-    auto *user = dialog.findChild<QLineEdit *>("proxyUsername");
-    auto *password = dialog.findChild<QLineEdit *>("proxyPassword");
-    QVERIFY(mode); QVERIFY(url); QVERIFY(user); QVERIFY(password);
-    // Manual fields are disabled until the user selects manual mode.
+    QVERIFY(mode); QVERIFY(url);
+    QCOMPARE(mode->currentData().toString(), QString("system"));
     QVERIFY(!url->isEnabled());
     mode->setCurrentIndex(mode->findData("manual"));
     QVERIFY(url->isEnabled());
     QSignalSpy changed(&dialog, &SettingsDialog::preferencesChanged);
     url->setText("http://proxy.example.com:3128");
     QTest::keyClick(url, Qt::Key_Return);
-    user->setText("osm");
-    QTest::keyClick(user, Qt::Key_Return);
-    password->setText("secret");
-    QTest::keyClick(password, Qt::Key_Return);
     QVERIFY(changed.size() >= 1);
     QCOMPARE(QSettings().value("proxy/mode").toString(), QString("manual"));
     QCOMPARE(QSettings().value("proxy/http").toString(), QString("http://proxy.example.com:3128"));
-    QCOMPARE(QSettings().value("proxy/username").toString(), QString("osm"));
+    QVERIFY(!dialog.findChild<QLineEdit *>("proxyUsername"));
+    QVERIFY(!dialog.findChild<QLineEdit *>("proxyPassword"));
     // Switching back to "off" disables the manual fields again.
     mode->setCurrentIndex(mode->findData("none"));
     QVERIFY(!url->isEnabled());

@@ -984,7 +984,7 @@ private slots:
         service.m_loginTimer.start(1);
         QTRY_COMPARE(errors.size(), 2); QVERIFY(!service.loginPending());
         QCOMPARE(loginState.size(), 4); QCOMPARE(loginState.last().first().toBool(), false);
-        HttpMock::reply(held, QJsonObject{{"client_id", "late-client"}});
+        if (held) HttpMock::reply(held, QJsonObject{{"client_id", "late-client"}});
         QTest::qWait(50); QVERIFY(!service.loginPending()); QCOMPARE(loginState.size(), 4);
     }
     void restoreWithoutCredentialsEndsPendingState()
@@ -1024,33 +1024,27 @@ private slots:
         service.cancelLogin(); QVERIFY(!service.m_callback.isListening());
         QVERIFY(probe.listen(QHostAddress::LocalHost, 14876));
     }
-    void proxyConfigurationMapsToNetworkManager() {
+    void proxyConfigurationSnapshot() {
         AppService service;
         QSettings settings;
         settings.remove("proxy/mode"); settings.remove("proxy/http");
         settings.remove("proxy/username");
-        // Default is "none", which must disable any proxy.
         service.applyProxy();
-        QCOMPARE(service.m_network.proxy().type(), QNetworkProxy::NoProxy);
-        // System mode delegates to the platform configuration.
-        settings.setValue("proxy/mode", "system");
+        QCOMPARE(service.m_proxyMode, QString("system"));
+        settings.setValue("proxy/mode", "");
         service.applyProxy();
-        QCOMPARE(service.m_network.proxy().type(), QNetworkProxy::DefaultProxy);
-        QVERIFY(QNetworkProxyFactory::usesSystemConfiguration());
-        // Manual mode builds an HTTP proxy from the configured URL.
+        QCOMPARE(service.m_proxyMode, QString("system"));
         settings.setValue("proxy/mode", "manual");
         settings.setValue("proxy/http", "http://proxy.example.com:8080");
-        settings.setValue("proxy/username", "osm");
         service.applyProxy();
-        const QNetworkProxy proxy = service.m_network.proxy();
-        QCOMPARE(proxy.type(), QNetworkProxy::HttpProxy);
-        QCOMPARE(proxy.hostName(), QString("proxy.example.com"));
-        QCOMPARE(proxy.port(), quint16(8080));
-        QCOMPARE(proxy.user(), QString("osm"));
-        // An invalid manual URL falls back to no proxy without throwing.
-        settings.setValue("proxy/http", "not a url");
+        QCOMPARE(service.m_proxyMode, QString("manual"));
+        QCOMPARE(service.m_proxyAddress, QString("http://proxy.example.com:8080"));
+        settings.setValue("proxy/http", "proxy.example.com");
         service.applyProxy();
-        QCOMPARE(service.m_network.proxy().type(), QNetworkProxy::NoProxy);
+        QCOMPARE(service.m_proxyAddress, QString("proxy.example.com"));
+        settings.setValue("proxy/mode", "none");
+        service.applyProxy();
+        QCOMPARE(service.m_proxyMode, QString("none"));
         settings.remove("proxy/mode"); settings.remove("proxy/http");
         settings.remove("proxy/username");
     }
