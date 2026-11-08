@@ -1,6 +1,8 @@
 #include "appservice.h"
 #include "platform.h"
 
+#include <QNetworkProxy>
+#include <QSettings>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDesktopServices>
@@ -145,6 +147,7 @@ AppService::AppService(QObject *parent) : QObject(parent), m_network(this), m_ca
     m_loginTimer.setSingleShot(true);
     m_loginTimer.setInterval(5 * 60 * 1000);
     connect(&m_loginTimer, &QTimer::timeout, this, [this] { failLogin(tr("登录超时，请重试")); });
+    applyProxy();
     m_sessionTimer.setSingleShot(true);
     connect(&m_sessionTimer, &QTimer::timeout, this, [this] {
         if (!checkSessionExpiry()) scheduleSessionExpiry();
@@ -187,6 +190,39 @@ AppService::AppService(QObject *parent) : QObject(parent), m_network(this), m_ca
 QString AppService::credentialKey() const
 {
     return QStringLiteral("oauth-") + QString::fromLatin1(QCryptographicHash::hash(m_site.toUtf8(), QCryptographicHash::Sha256).toHex());
+}
+void AppService::applyProxy() {
+    const QSettings settings;
+    const QString mode = settings.value("proxy/mode", "none").toString();
+    if (mode == QStringLiteral("system")) {
+        // Honor the platform/system proxy configuration (PAC or environment).
+        QNetworkProxyFactory::setUseSystemConfiguration(true);
+        m_network.setProxy(QNetworkProxy(QNetworkProxy::DefaultProxy));
+        return;
+    }
+    QNetworkProxyFactory::setUseSystemConfiguration(false);
+    if (mode != QStringLiteral("manual")) {
+        m_network.setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
+        return;
+    }
+    const QString raw = settings.value("proxy/http").toString().trimmed();
+    const QUrl url(raw);
+    if (!url.isValid() || url.host().isEmpty()) {
+        m_network.setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
+        return;
+    }
+    QNetworkProxy proxy(QNetworkProxy::HttpProxy, url.host(),
+                       static_cast<quint16>(url.port() == -1 ? 8080 : url.port()));
+    const QString username = settings.value("proxy/username").toString();
+    if (!username.isEmpty()) {
+        proxy.setUser(username);
+        // Read the secret from the OS credential store when available, falling
+        // back to an empty password rather than persisting it in plaintext.
+        QString password;
+        CredentialStore::read("proxy-" + username, &password);
+        proxy.setPassword(password);
+    }
+    m_network.setProxy(proxy);
 }
 
 bool AppService::configureSite(QString site)

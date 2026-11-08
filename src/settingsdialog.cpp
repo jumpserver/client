@@ -277,6 +277,58 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
             "quit");
   addBool(g, text("下次启动恢复登录", "Restore login on startup"),
           "general/restoreLogin", true);
+  auto *proxyGroup = new QGroupBox(text("代理", "Proxy"), general);
+  auto *pg = new QFormLayout(proxyGroup);
+  styleForm(pg);
+  auto *proxyMode = addChoice(pg, text("模式", "Mode"), "proxy/mode",
+                             {{text("关闭", "Off"), "none"},
+                              {text("系统代理", "System proxy"), "system"},
+                              {text("手动", "Manual"), "manual"}},
+                             "none");
+  auto *proxyUrl = new QLineEdit(this);
+  proxyUrl->setObjectName("proxyHttp");
+  proxyUrl->setPlaceholderText(text("http://proxy.example.com:8080",
+                                    "http://proxy.example.com:8080"));
+  proxyUrl->setText(QSettings().value("proxy/http").toString());
+  pg->addRow(text("地址", "Address"), proxyUrl);
+  alignField(pg, proxyUrl);
+  auto *proxyUser = new QLineEdit(this);
+  proxyUser->setObjectName("proxyUsername");
+  proxyUser->setText(QSettings().value("proxy/username").toString());
+  pg->addRow(text("用户名", "Username"), proxyUser);
+  alignField(pg, proxyUser);
+  auto *proxyPassword = new QLineEdit(this);
+  proxyPassword->setObjectName("proxyPassword");
+  proxyPassword->setEchoMode(QLineEdit::Password);
+  proxyPassword->setPlaceholderText(text("留空则不保存密码", "Empty to skip saving"));
+  pg->addRow(text("密码", "Password"), proxyPassword);
+  alignField(pg, proxyPassword);
+  connect(proxyMode, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+          [this, proxyMode, proxyUrl, proxyUser, proxyPassword] {
+            const bool manual = proxyMode->currentData() == "manual";
+            proxyUrl->setEnabled(manual);
+            proxyUser->setEnabled(manual);
+            proxyPassword->setEnabled(manual);
+          });
+  const bool manualInitially = proxyMode->currentData() == "manual";
+  proxyUrl->setEnabled(manualInitially);
+  proxyUser->setEnabled(manualInitially);
+  proxyPassword->setEnabled(manualInitially);
+  auto persistProxy = [this, proxyMode, proxyUrl, proxyUser, proxyPassword] {
+    QSettings().setValue("proxy/mode", proxyMode->currentData());
+    QSettings().setValue("proxy/http", proxyUrl->text().trimmed());
+    QSettings().setValue("proxy/username", proxyUser->text().trimmed());
+    if (!proxyPassword->text().isEmpty()) {
+      // Keep the secret in the OS credential store instead of plaintext settings.
+      QString error;
+      CredentialStore::write("proxy-" + proxyUser->text().trimmed(),
+                            proxyPassword->text().toUtf8(), &error);
+    }
+    emit preferencesChanged();
+  };
+  connect(proxyUrl, &QLineEdit::editingFinished, this, persistProxy);
+  connect(proxyUser, &QLineEdit::editingFinished, this, persistProxy);
+  connect(proxyPassword, &QLineEdit::editingFinished, this, persistProxy);
   auto *appearance = new QFrame;
   auto *a = new QFormLayout(appearance);
   styleForm(a);

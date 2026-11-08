@@ -13,6 +13,7 @@
 #include <QTemporaryDir>
 #include <QFile>
 #include <QNetworkReply>
+#include <QNetworkProxy>
 #include <QSignalSpy>
 #include <QSslCertificate>
 #include <QSslConfiguration>
@@ -1022,6 +1023,36 @@ private slots:
         QCOMPARE(mock.requests.size(), 2);
         service.cancelLogin(); QVERIFY(!service.m_callback.isListening());
         QVERIFY(probe.listen(QHostAddress::LocalHost, 14876));
+    }
+    void proxyConfigurationMapsToNetworkManager() {
+        AppService service;
+        QSettings settings;
+        settings.remove("proxy/mode"); settings.remove("proxy/http");
+        settings.remove("proxy/username");
+        // Default is "none", which must disable any proxy.
+        service.applyProxy();
+        QCOMPARE(service.m_network.proxy().type(), QNetworkProxy::NoProxy);
+        // System mode delegates to the platform configuration.
+        settings.setValue("proxy/mode", "system");
+        service.applyProxy();
+        QCOMPARE(service.m_network.proxy().type(), QNetworkProxy::DefaultProxy);
+        QVERIFY(QNetworkProxyFactory::usesSystemConfiguration());
+        // Manual mode builds an HTTP proxy from the configured URL.
+        settings.setValue("proxy/mode", "manual");
+        settings.setValue("proxy/http", "http://proxy.example.com:8080");
+        settings.setValue("proxy/username", "osm");
+        service.applyProxy();
+        const QNetworkProxy proxy = service.m_network.proxy();
+        QCOMPARE(proxy.type(), QNetworkProxy::HttpProxy);
+        QCOMPARE(proxy.hostName(), QString("proxy.example.com"));
+        QCOMPARE(proxy.port(), quint16(8080));
+        QCOMPARE(proxy.user(), QString("osm"));
+        // An invalid manual URL falls back to no proxy without throwing.
+        settings.setValue("proxy/http", "not a url");
+        service.applyProxy();
+        QCOMPARE(service.m_network.proxy().type(), QNetworkProxy::NoProxy);
+        settings.remove("proxy/mode"); settings.remove("proxy/http");
+        settings.remove("proxy/username");
     }
 };
 

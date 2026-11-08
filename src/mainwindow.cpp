@@ -1628,6 +1628,7 @@ void MainWindow::showSettings() {
   connect(&dialog, &SettingsDialog::preferencesChanged, this, [this] {
     ClientTheme::apply();
     retranslateUi();
+    m_service->applyProxy();
     emit preferencesChanged();
   });
   dialog.exec();

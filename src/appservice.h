@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QNetworkProxy>
 #include <QNetworkAccessManager>
 #include <QTcpServer>
 #include <QTimer>
@@ -37,6 +38,9 @@ public:
     void rename(QString id, QString name);
     void connection(QJsonObject body, QJsonObject extra = QJsonObject());
     void metadata();
+    // Apply the proxy configuration from QSettings to the shared network manager.
+    // Call after construction and whenever the user changes proxy settings.
+    void applyProxy();
 signals:
     void contextChanged();
     void methodsLookupStarted();
