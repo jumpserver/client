@@ -108,7 +108,7 @@ jobs:
           --arch '${{ matrix.arch }}' --deployment-target "$MACOSX_DEPLOYMENT_TARGET" --parallel 3
       - name: Build native client
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$QT_PREFIX" -DCLIENT_VERSION="$CLIENT_VERSION" -DBUILD_TESTING=OFF -DCMAKE_OSX_ARCHITECTURES='${{ matrix.arch }}' -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$QT_PREFIX" -DCLIENT_VERSION="$CLIENT_VERSION" -DCMAKE_OSX_ARCHITECTURES='${{ matrix.arch }}' -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
           cmake --build build --parallel 3
       - name: Import Developer ID certificate
         if: needs.metadata.outputs.sign_macos == 'true'
@@ -213,7 +213,7 @@ jobs:
         shell: pwsh
         run: |
           $env:PATH = "$env:QT_PREFIX\bin;$env:PATH"
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF "-DCMAKE_PREFIX_PATH=$env:QT_PREFIX" "-DCLIENT_VERSION=$env:CLIENT_VERSION"
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=$env:QT_PREFIX" "-DCLIENT_VERSION=$env:CLIENT_VERSION"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           cmake --build build --parallel 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -296,7 +296,7 @@ jobs:
               dnf install -y gcc-c++ cmake make python39 qt5-qtbase-devel qt5-qtsvg-devel libsecret-devel rpm-build desktop-file-utils xdg-utils pkgconf-pkg-config dejavu-sans-fonts file
               python=python3.9
             fi
-            "$python" /src/scripts/package-linux.py --format "$PACKAGE_FORMAT" --build /tmp/build --output /out --helpers /helpers --parallel 3 --skip-tests --cmake-arg "CLIENT_VERSION=$CLIENT_VERSION"
+            "$python" /src/scripts/package-linux.py --format "$PACKAGE_FORMAT" --build /tmp/build --output /out --helpers /helpers --parallel 3 --cmake-arg "CLIENT_VERSION=$CLIENT_VERSION"
           '
       - name: Install and smoke-test in clean runtime container
         run: |
@@ -321,8 +321,69 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # Kylin V10 SP1 ships Qt 5.12 (5.12.12), so the Debian 11 / Qt 5.15.2 package
+  # cannot be installed there. Build a separate arm64 DEB against a Qt 5.12
+  # baseline; the package keeps the client identity but a distinct file name.
+  linux-kylin:
+    needs: metadata
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    env:
+      CLIENT_VERSION: ${{ needs.metadata.outputs.version }}
+      BUILD_IMAGE: ubuntu:20.04@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214
+      TARGET_ARCH: arm64
+      PACKAGE_VARIANT: kylin
+      QT5_MIN_VERSION: '5.12'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go-client/go.sum
+      - name: Build target Go launchers
+        run: python scripts/build-launchers.py --goos linux --goarch "$TARGET_ARCH" --output helpers
+      - name: Build Kylin V10 SP1 arm64 DEB in a Qt 5.12 container
+        run: |
+          mkdir -p dist
+          docker run --rm --platform "linux/$TARGET_ARCH" \
+            -e CLIENT_VERSION -e PACKAGE_VARIANT -e QT5_MIN_VERSION \
+            -v "$PWD:/src:ro" -v "$PWD/helpers:/helpers:ro" -v "$PWD/dist:/out" "$BUILD_IMAGE" sh -ec '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --no-install-recommends cmake g++ make python3 \
+                qtbase5-dev libqt5svg5-dev libsecret-1-dev pkg-config dpkg-dev \
+                desktop-file-utils xdg-utils ca-certificates file
+              python3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)"
+              python3 /src/scripts/package-linux.py --format deb --build /tmp/build --output /out \
+                --helpers /helpers --parallel 3 \
+                --cmake-arg "CLIENT_VERSION=$CLIENT_VERSION" \
+                --cmake-arg "CLIENT_QT5_MIN_VERSION=$QT5_MIN_VERSION" \
+                --cmake-arg "CLIENT_PACKAGE_VARIANT=$PACKAGE_VARIANT"
+          '
+      - name: Install and smoke-test in a Qt 5.12 runtime container
+        run: |
+          docker run --rm --platform "linux/$TARGET_ARCH" -v "$PWD:/src:ro" -v "$PWD/dist:/out:ro" "$BUILD_IMAGE" sh -ec '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends /out/*.deb desktop-file-utils xdg-utils ca-certificates
+            sh /src/packaging/linux/verify-installed.sh
+          '
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OSMClient-${{ needs.metadata.outputs.version }}-linux-${{ env.TARGET_ARCH }}-${{ env.PACKAGE_VARIANT }}
+          path: |
+            dist/*.deb
+            dist/*.manifest.json
+          if-no-files-found: error
+          retention-days: 14
+
   release:
-    needs: [metadata, macos, windows, linux]
+    needs: [metadata, macos, windows, linux, linux-kylin]
     if: (github.ref == 'refs/heads/osm-qt' || github.base_ref == 'osm-qt' || github.ref_type == 'tag') && (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     permissions:
@@ -352,6 +413,10 @@ jobs:
               }
             done
           done
+          test -f "release-assets/OSMClient-${CLIENT_VERSION}-linux-arm64-kylin.deb" || {
+            echo "Missing Kylin V10 SP1 arm64 DEB installer" >&2
+            exit 1
+          }
         env:
           CLIENT_VERSION: ${{ needs.metadata.outputs.version }}
       - uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2.4.2

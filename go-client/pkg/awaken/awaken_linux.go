@@ -30,6 +30,53 @@ func validateAppPath(appPath string) error {
 	return nil
 }
 
+// terminalCommand picks an installed terminal emulator for the current desktop.
+// Distributions such as Kylin V10 report UKUI but only ship mate-terminal.
+func terminalCommand(command string) *exec.Cmd {
+	shell := fmt.Sprintf("%s; exec bash -i", command)
+	desktop := strings.ToLower(strings.TrimSpace(os.Getenv("XDG_CURRENT_DESKTOP")))
+	if desktop == "" {
+		desktop = strings.ToLower(strings.TrimSpace(os.Getenv("DESKTOP_SESSION")))
+	}
+
+	var candidates []string
+	switch {
+	case strings.Contains(desktop, "ukui"):
+		candidates = []string{"ukui-terminal", "mate-terminal", "gnome-terminal", "x-terminal-emulator"}
+	case strings.Contains(desktop, "deepin"):
+		candidates = []string{"deepin-terminal", "mate-terminal", "x-terminal-emulator"}
+	case strings.Contains(desktop, "kde"):
+		candidates = []string{"konsole", "x-terminal-emulator"}
+	case strings.Contains(desktop, "xfce"):
+		candidates = []string{"xfce4-terminal", "x-terminal-emulator"}
+	case strings.Contains(desktop, "lxde"):
+		candidates = []string{"lxterminal", "x-terminal-emulator"}
+	case strings.Contains(desktop, "gnome"), strings.Contains(desktop, "cinnamon"), strings.Contains(desktop, "unity"):
+		candidates = []string{"gnome-terminal", "mate-terminal", "x-terminal-emulator"}
+	default:
+		candidates = []string{"gnome-terminal", "mate-terminal", "ukui-terminal", "deepin-terminal", "konsole", "xfce4-terminal", "lxterminal", "x-terminal-emulator"}
+	}
+
+	for _, name := range candidates {
+		if _, err := exec.LookPath(name); err != nil {
+			continue
+		}
+		switch name {
+		case "gnome-terminal":
+			return exec.Command(name, "--", "bash", "-c", shell)
+		case "deepin-terminal":
+			return exec.Command(name, "--keep-open", "-C", shell)
+		case "konsole":
+			return exec.Command(name, "--noclose", "-e", "bash", "-c", shell)
+		case "xfce4-terminal":
+			return exec.Command(name, "--hold", "-e", "bash", "-c", shell)
+		default:
+			return exec.Command(name, "-x", "bash", "-c", shell)
+		}
+	}
+	return nil
+}
+
 func awakenRDPCommand(filePath string, cfg *config.AppConfig) *exec.Cmd {
 	global.LOG.Debug(filePath)
 	var appItem *config.AppItem
@@ -125,32 +172,9 @@ func awakenSSHCommand(r *Rouse, cfg *config.AppConfig) *exec.Cmd {
 		currentPath, _ := filepath.Abs(filepath.Dir(os.Args[0]))
 		commands := getCommandFromArgs(connectMap, appItem.ArgFormat)
 		clientPath := filepath.Join(currentPath, "client")
-		out, err := exec.Command("bash", "-c", "echo $XDG_CURRENT_DESKTOP").CombinedOutput()
-		if err != nil {
-			global.LOG.Error(fmt.Sprintf("Failed to detect desktop environment: %v", err))
-			return nil
-		}
-
-		currentDesktop := strings.ToLower(strings.TrimSpace(string(out)))
-
-		switch currentDesktop {
-		case "gnome", "ubuntu:gnome", "ukui", "cinnamon", "x-cinnamon":
-			cmd = exec.Command("gnome-terminal", "--", "bash", "-c",
-				fmt.Sprintf("%s %s; exec bash -i", clientPath, commands),
-			)
-		case "unity":
-			cmd = exec.Command("x-terminal-emulator", "-e", fmt.Sprintf("%s %s", clientPath, commands))
-		case "deepin":
-			cmd = exec.Command("deepin-terminal", "--keep-open", "-C", fmt.Sprintf("%s %s", clientPath, commands))
-		case "kde":
-			cmd = exec.Command("konsole", "--noclose", "-e", "bash", "-c", fmt.Sprintf("%s %s", clientPath, commands))
-		case "xfce":
-			cmd = exec.Command("xfce4-terminal", "--hold", "-e", fmt.Sprintf("%s %s", clientPath, commands))
-		case "lxde":
-			cmd = exec.Command("lxterminal", "-e", fmt.Sprintf("%s %s", clientPath, commands))
-		default:
-			msg := fmt.Sprintf("Not yet supported %s desktop system", currentDesktop)
-			global.LOG.Info(msg)
+		cmd = terminalCommand(fmt.Sprintf("%s %s", clientPath, commands))
+		if cmd == nil {
+			global.LOG.Error("No supported terminal emulator found")
 		}
 	} else {
 		if r.Protocol == "sqlserver" {
@@ -213,20 +237,9 @@ func awakenDBCommand(r *Rouse, cfg *config.AppConfig) *exec.Cmd {
 		}
 		commands := getCommandFromArgs(connectMap, argFormat)
 
-		out, _ := exec.Command("bash", "-c", "echo $XDG_CURRENT_DESKTOP").CombinedOutput()
-		currentDesktop := strings.ToLower(strings.Trim(string(out), "\n"))
-
-		switch currentDesktop {
-		case "gnome", "ubuntu:gnome", "ukui":
-			cmd = exec.Command(
-				"gnome-terminal", "--", "bash", "-c",
-				fmt.Sprintf("%s; exec bash -i", commands),
-			)
-		case "deepin":
-			cmd = exec.Command("deepin-terminal", "--keep-open", "-C", commands)
-		default:
-			msg := fmt.Sprintf("Not yet supported %s desktop system", currentDesktop)
-			global.LOG.Info(msg)
+		cmd = terminalCommand(commands)
+		if cmd == nil {
+			global.LOG.Error("No supported terminal emulator found")
 		}
 		return cmd
 	} else {

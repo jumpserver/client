@@ -69,7 +69,7 @@ def smoke(bundle):
            if not key.startswith(('DYLD_', 'QT_', 'QML_', 'QML2_'))}
     env['QT_QPA_PLATFORM'] = 'cocoa'
     try:
-        result = subprocess.run([str(bundle / 'Contents/MacOS/client-qt'), '--smoke-test'],
+        result = subprocess.run([str(bundle / 'Contents/MacOS/client'), '--smoke-test'],
                                 env=env, cwd=bundle.parent, timeout=20,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     except subprocess.TimeoutExpired:

@@ -93,7 +93,7 @@ def main():
             parser.error("Host tools must match Qt " + VERSION)
     if " " in str(work) or " " in str(prefix):
         parser.error("Qt 5 source builds require work/prefix paths without spaces")
-    marker = prefix / "client-qt-toolchain.json"
+    marker = prefix / "client-toolchain.json"
     expected = {"qt": VERSION, "system": system, "arch": args.arch,
                 "deployment_target": args.deployment_target, "host_bindir": str(host) if host else None,
                 "recipe": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}

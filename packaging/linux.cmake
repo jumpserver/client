@@ -1,12 +1,22 @@
 # Native DEB/RPM metadata. The generators inspect the libraries in the build
 # distribution; package-linux.py refuses to generate RPMs on Debian hosts.
-set(CPACK_PACKAGE_NAME "client-qt")
-# Preserve the native package identity for upgrades; only the download name changes.
+set(CPACK_PACKAGE_NAME "client")
+# Keep the native package name aligned with the installed executable; only the
+# download file name carries the OSMClient branding and variant suffix.
 set(_package_arch "${CLIENT_GOARCH}")
 if(NOT _package_arch)
   set(_package_arch "${CMAKE_SYSTEM_PROCESSOR}")
 endif()
-set(CPACK_PACKAGE_FILE_NAME "OSMClient-${PROJECT_VERSION}-linux-${_package_arch}")
+# Distribution-specific builds keep the same package identity so upgrades work,
+# but use a distinct download name, e.g. OSMClient-4.1.4-linux-arm64-kylin.deb.
+set(_package_variant "")
+if(CLIENT_PACKAGE_VARIANT)
+  if(NOT CLIENT_PACKAGE_VARIANT MATCHES "^[a-z0-9_]+$")
+    message(FATAL_ERROR "CLIENT_PACKAGE_VARIANT must contain only a-z, 0-9 and underscore")
+  endif()
+  set(_package_variant "-${CLIENT_PACKAGE_VARIANT}")
+endif()
+set(CPACK_PACKAGE_FILE_NAME "OSMClient-${PROJECT_VERSION}-linux-${_package_arch}${_package_variant}")
 set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
 set(CPACK_PACKAGE_RELOCATABLE FALSE)
 set(CPACK_PACKAGE_DESCRIPTION "OSMClient desktop client with OAuth login, authorized assets and native protocol launchers.")
@@ -15,7 +25,7 @@ set(CPACK_PACKAGE_HOMEPAGE_URL "https://www.jumpserver.org/")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_STRIP_FILES TRUE)
 
-set(CPACK_DEBIAN_PACKAGE_NAME "client-qt")
+set(CPACK_DEBIAN_PACKAGE_NAME "client")
 set(CPACK_DEBIAN_FILE_NAME "${CPACK_PACKAGE_FILE_NAME}.deb")
 set(CPACK_DEBIAN_PACKAGE_RELEASE "1")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "FIT2CLOUD")
@@ -31,7 +41,7 @@ set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
   "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/postrm")
 set(CPACK_DEBIAN_PACKAGE_CONTROL_STRICT_PERMISSION TRUE)
 
-set(CPACK_RPM_PACKAGE_NAME "client-qt")
+set(CPACK_RPM_PACKAGE_NAME "client")
 set(CPACK_RPM_FILE_NAME "${CPACK_PACKAGE_FILE_NAME}.rpm")
 set(CPACK_RPM_PACKAGE_RELEASE "1")
 set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)

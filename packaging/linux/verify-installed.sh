@@ -1,20 +1,20 @@
 #!/bin/sh
 # Run after installing the native package in a disposable target distribution.
 set -eu
-test -x /usr/bin/client-qt
-test -f /usr/lib/client-qt/bin/config.json
-test -f /usr/share/icons/hicolor/512x512/apps/client-qt.png
-test -f /usr/share/licenses/client-qt/LICENSE
+test -x /usr/bin/client
+test -f /usr/lib/client/bin/config.json
+test -f /usr/share/icons/hicolor/512x512/apps/client.png
+test -f /usr/share/licenses/client/LICENSE
 count=0
-for launcher in /usr/lib/client-qt/bin/linux-*/JumpServerClient; do
+for launcher in /usr/lib/client/bin/linux-*/JumpServerClient; do
     test -x "$launcher"
     test -x "$(dirname "$launcher")/client"
     count=$((count + 1))
 done
 test "$count" -eq 1
-desktop-file-validate /usr/share/applications/client-qt.desktop
-grep -q 'x-scheme-handler/jms=.*client-qt.desktop' /usr/share/applications/mimeinfo.cache
-dependencies=$(ldd /usr/bin/client-qt)
+desktop-file-validate /usr/share/applications/client.desktop
+grep -q 'x-scheme-handler/jms=.*client.desktop' /usr/share/applications/mimeinfo.cache
+dependencies=$(ldd /usr/bin/client)
 printf '%s\n' "$dependencies"
 if printf '%s\n' "$dependencies" | grep -q 'not found'; then
     exit 1
@@ -40,5 +40,5 @@ mkdir -p "$smoke_home/config" "$smoke_home/cache" "$smoke_home/runtime"
 chmod 700 "$smoke_home/runtime"
 HOME="$smoke_home" XDG_CONFIG_HOME="$smoke_home/config" \
     XDG_CACHE_HOME="$smoke_home/cache" XDG_RUNTIME_DIR="$smoke_home/runtime" \
-    QT_QPA_PLATFORM=offscreen /usr/bin/client-qt --smoke-test
+    QT_QPA_PLATFORM=offscreen /usr/bin/client --smoke-test
 printf '%s\n' 'Installed package smoke test passed.'

@@ -37,7 +37,7 @@ def cleanup(state_path):
         return
     state = json.loads(state_path.read_text())
     keychain = Path(state['keychain'])
-    if keychain.name != 'signing.keychain-db' or not keychain.parent.name.startswith('client-qt-signing-'):
+    if keychain.name != 'signing.keychain-db' or not keychain.parent.name.startswith('client-signing-'):
         raise RuntimeError('Refusing to clean up an unrecognized keychain location')
     errors = []
     try:
@@ -76,7 +76,7 @@ def setup():
         certificate = base64.b64decode(''.join(os.environ['APPLE_CERTIFICATE'].split()), validate=True)
     except ValueError:
         raise RuntimeError('APPLE_CERTIFICATE is not valid base64') from None
-    directory = Path(tempfile.mkdtemp(prefix='client-qt-signing-', dir=os.environ.get('RUNNER_TEMP')))
+    directory = Path(tempfile.mkdtemp(prefix='client-signing-', dir=os.environ.get('RUNNER_TEMP')))
     directory.chmod(0o700)
     keychain = directory / 'signing.keychain-db'
     p12 = directory / 'certificate.p12'

@@ -14,9 +14,7 @@
 - 字符集、退格键、RDP 分辨率/全屏/多屏/磁盘映射、主题、字体、主题色、中英文、本地应用选择、版本信息、托盘和单实例。
 - macOS/Windows/Linux 的 `jms://` 注册模板与平台凭据存储。
 
-功能映射和差异见 [迁移说明](docs/migration.md)，实际测试见 [验证记录](docs/validation.md)，系统/架构规划见 [兼容性矩阵](docs/compatibility.md)。
-
-![离线测试资产界面](docs/screenshots/assets-grid.png)
+功能映射和差异见 [迁移说明](docs/migration.md)，系统/架构规划见 [兼容性矩阵](docs/compatibility.md)。
 
 界面沿用原 client 的紧凑资源浏览布局：灰色侧栏、单排图标工具栏、自适应横向资产卡和绿色连接按钮。登录、连接、设置与本地应用页使用统一的间距、圆角、线条图标及亮/暗主题；折叠侧栏后可从账户菜单切换站点或退出登录。
 
@@ -36,7 +34,7 @@
 
 ```sh
 ./build.sh --platform macos --arch arm64 \
-  --qt-prefix /tmp/osmclient-qt-arm64 \
+  --qt-prefix /tmp/osmclient-arm64 \
   --go /Users/gerry/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.21.13.darwin-arm64/bin/go
 ```
 
@@ -45,7 +43,6 @@
 ```sh
 cmake -S . -B build-qt5 -DCLIENT_QT_MAJOR=5 -DCMAKE_PREFIX_PATH=/path/to/Qt/5.15/compiler
 cmake --build build-qt5 --parallel
-ctest --test-dir build-qt5 --output-on-failure
 ```
 
 Qt 6 使用独立构建目录：
@@ -53,7 +50,6 @@ Qt 6 使用独立构建目录：
 ```sh
 cmake -S . -B build-qt6 -DCLIENT_QT_MAJOR=6 -DCMAKE_PREFIX_PATH=/path/to/Qt/6/compiler
 cmake --build build-qt6 --parallel
-ctest --test-dir build-qt6 --output-on-failure
 ```
 
 本机 Homebrew Qt 5 路径为 `/opt/homebrew/opt/qt@5`。分拆安装的 Homebrew Qt 6 可显式传入 `-DQt6_DIR=/opt/homebrew/lib/cmake/Qt6 -DQt6Svg_DIR=/opt/homebrew/lib/cmake/Qt6Svg -DCMAKE_PREFIX_PATH=/opt/homebrew`。不要在同一个构建目录切换 Qt 主版本。
@@ -68,19 +64,18 @@ Linux 安装对应发行版的 Qt 5 开发包、QtSvg、编译工具和 `libsecr
 | `GO_EXECUTABLE=/path/to/go` | 为目标系统指定 Go 工具链 |
 | `CLIENT_GOOS` / `CLIENT_GOARCH` | 交叉编译启动器，默认匹配 CMake 的目标系统/架构 |
 | `CLIENT_BUILD_LAUNCHERS=OFF` | 仅构建 Qt 代码；此产物不能独立拉起连接 |
-| `BUILD_TESTING=OFF` | 不构建测试程序 |
 
 只交叉编译 Go 启动器不会生成对应平台的 Qt GUI。GUI 仍需要目标 Qt SDK、编译器和 sysroot。每个构建目录只产生一个目标架构。
 
-运行：macOS 打开 `build-qt5/client-qt.app`，Windows 运行构建目录中的 `client.exe`，Linux 运行 `build-qt5/client-qt`。`--smoke-test` 使用临时设置，跳过真实凭据恢复，并自动退出。
+运行：macOS 打开 `build-qt5/client.app`，Windows 运行构建目录中的 `client.exe`，Linux 运行 `build-qt5/client`。`--smoke-test` 使用临时设置，跳过真实凭据恢复，并自动退出。
 
 ## 登录与本地配置
 
 安装包需先注册 `jms://`，才能从浏览器回到客户端。设置菜单与原 client 对齐，不再提供“高级”入口；既有本地回调的内部兼容能力保留。不要将账户密码或 token 写进命令行、源码或配置示例。
 
-Qt 的界面设置存于 `FIT2CLOUD/client-qt` 的平台设置位置。Go 应用配置继续使用原 `jumpserver-client/config.json`，设置页的应用选择会同步影响使用同一配置的原客户端。配置合并保留已有应用路径/偏好，损坏的配置报错且不覆盖。
+Qt 的界面设置存于 `FIT2CLOUD/client` 的平台设置位置。Go 应用配置继续使用原 `jumpserver-client/config.json`，设置页的应用选择会同步影响使用同一配置的原客户端。配置合并保留已有应用路径/偏好，损坏的配置报错且不覆盖。
 
-界面、系统应用显示名与安装器统一为 `OSMClient`。源码目录/构建目标 `client-qt`、既有配置与凭据标识保持稳定，改名不迁移或清空已有配置。
+界面、系统应用显示名与安装器统一为 `OSMClient`。源码目录仍为 `client-qt`，构建目标、安装路径、安装文件名及配置/凭据命名空间统一为 `client`；旧 `client-qt` 命名空间不会自动迁移。
 
 登录 token 与手工输入凭据保存在 macOS Keychain、Windows Credential Manager 或 Linux Secret Service。Qt 登录状态不导入原 Tauri 的凭据；首次使用需要登录。连接偏好按站点、用户、组织及资产隔离。
 
@@ -103,22 +98,8 @@ Qt 的界面设置存于 `FIT2CLOUD/client-qt` 的平台设置位置。Go 应用
 
 安装包格式不改变二进制最低系统要求。旧 Windows、macOS、UOS/麒麟及不同国产 CPU 需要匹配的 Qt、编译器、Go 工具链与原生发行版环境；详见 [兼容性矩阵](docs/compatibility.md)。
 
-## 测试与发布
+## 发布与验证
 
-Qt Test 使用本地 HTTP mock、临时设置、模拟启动器和离线资产 fixture，不连接生产站点。默认不访问系统凭据库；可用 `CLIENT_QT_TEST_CREDENTIAL_STORE=1` 显式运行仅操作随机测试 key 的凭据往返用例。
+安装包由 `scripts/package-linux.py`、`scripts/package-macos.py`、`scripts/package-windows.py` 生成；CI 在干净容器或目标系统中安装产物，校验依赖、桌面入口、MIME 注册、安装/卸载和启动 smoke。
 
-```sh
-QT_QPA_PLATFORM=offscreen CLIENT_QT_SCREENSHOT_DIR=/tmp/client-qt-ui ./build-qt5/test_ui
-```
-
-上述命令可导出测试资产界面截图。测试数据只存在于测试程序，主程序没有伪登录或假资产入口。
-
-可在独立进程中复查不同显示缩放、语言、窗口宽度及字体大小：
-
-```sh
-python3 scripts/capture-ui.py --test-executable build-qt5/test_ui --output /tmp/client-qt-ui-scales
-```
-
-默认检查 100%、125%、150% 缩放并生成 HTML 截图索引；输出目录需为空，避免覆盖已有检查记录。
-
-部署和协议注册见 [packaging/README.md](packaging/README.md)。本地构建与测试不代表已完成 Windows、UOS、麒麟及旧系统实机验收，也不代表完成签名、公证和正式安装包发布。
+部署和协议注册见 [packaging/README.md](packaging/README.md)。本地构建与安装包 smoke 验证不代表已完成 Windows、UOS、麒麟及旧系统实机验收，也不代表完成签名、公证和正式安装包发布。

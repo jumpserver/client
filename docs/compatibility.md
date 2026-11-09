@@ -33,21 +33,21 @@ LoongArch 启动器通过独立 `scripts/go-loong64.mod/.sum` 将 `x/sys` 提升
 | RISC-V64 / ARMv7 | 构建入口存在，历史记录有 helper 编译结果 | 本次未重跑，GUI 与系统实机未验收 |
 | 申威 sw_64 | 当前构建脚本不接受该架构 | 需要厂商工具链及专项移植，不能标为支持 |
 
-本次交叉编译输出位于 `/tmp/osm-domestic-audit/`，仅证明 Go helper 可编译，不是完整 GUI 安装包。36 项打包脚本回归通过。没有重新执行历史 Debian/Rocky GUI 构建，也没有 UOS、麒麟或龙芯实机运行结果。
+本次交叉编译输出位于 `/tmp/osm-domestic-audit/`，仅证明 Go helper 可编译，不是完整 GUI 安装包。没有重新执行历史 Debian/Rocky GUI 构建，也没有 UOS、麒麟或龙芯实机运行结果。
 
 已确认的缺口：
 
 - `go-client/pkg/awaken/awaken_linux.go` 的内置 SSH 桌面选择使用完整字符串匹配，`DDE`、`Deepin:GNOME` 返回空命令；`UKUI` 固定选择 `gnome-terminal`，没有检查并回退到已安装终端。数据库终端也存在同类逻辑。不能假设所有 UOS/麒麟桌面均设置相同标识或安装 GNOME 终端。
 - 同文件的 RDP 使用 `AppItem.Name` 启动而非 `AppItem.Path`，因此设置中的自定义客户端路径不起作用。这也影响以 RDP 拉起的远程应用。
-- 上述 SSH/RDP 问题已在复制到临时目录的源代码上编译测试程序，并在无网络的 Debian arm64 一次性容器中复现：DDE/组合标识返回 nil，缺少 GNOME 终端时 UKUI 启动失败，RDP 忽略可执行的配置路径。这里是缺陷复现通过，不能解读为系统兼容测试通过。未改动业务实现。
+- 上述 SSH/RDP 问题已在无网络的 Debian arm64 一次性容器中复现：DDE/组合标识返回 nil，缺少 GNOME 终端时 UKUI 启动失败，RDP 忽略可执行的配置路径。这里是缺陷复现记录，不代表系统兼容验收；终端选择已改为按桌面标识和实际安装情况回退。
 - `go-client/config.json` 的 Linux TigerVNC 下载链接固定为 x86_64，不能用于 ARM/龙芯；Linux `filetransfer` 默认目录为空，SFTP 不能据此宣称开箱可用。
-- CMake 要求 Qt >= 5.15；目标系统仅有更旧 Qt 时不能直接安装使用当前动态链接包，需提供匹配 ABI 的 Qt 5.15。RPM 依赖名称按现有构建发行版固定，必须在各目标软件源验证；不能简单将 DEB/RPM 后缀视为发行版兼容。
-- `.github/workflows/build.yml` 的 Linux 作业只构建 amd64 Debian/Rocky 包，没有 UOS、麒麟、ARM 或龙芯作业。打包脚本检查 ELF machine/端序，但没有检测 LoongArch 新旧世界 ABI 或自动限定 GLIBC/GLIBCXX 上限。
+- CMake 默认要求 Qt >= 5.15；通过 `CLIENT_QT5_MIN_VERSION=5.12` 可在 Qt 5.12 基线上构建，源码已移除对 `QByteArray::fromBase64Encoding`、`QWidget::screen()` 等 5.15 专用 API 的依赖。目标系统 Qt 低于该基线时仍不能安装使用动态链接包。RPM 依赖名称按现有构建发行版固定，必须在各目标软件源验证；不能简单将 DEB/RPM 后缀视为发行版兼容。
+- `.github/workflows/build.yml` 有独立的 `linux-kylin` 作业（`ubuntu:20.04` 容器 + Qt 5.12.8），产出 `OSMClient-<ver>-linux-arm64-kylin.deb`，覆盖银河麒麟 V10 SP1。UOS、龙芯等其它发行版仍未单独产包。打包脚本检查 ELF machine/端序，但没有检测 LoongArch 新旧世界 ABI 或自动限定 GLIBC/GLIBCXX 上限。
 - 直接 CMake 原生构建时 `mips64` 未自动映射到 `mips64le`；`package-linux.py` 已处理小端 `mips64` 并显式传入架构，直接构建需指定 `CLIENT_GOARCH=mips64le`。
 
 龙芯关键边界：上游 Go 的 LoongArch 实现采用 LP64D，初始支持要求 Linux 5.19；官方明确指出历史商业发行版的旧 syscall ABI 即使静态链接也不兼容，应使用发行版提供的 Go。不能仅凭 `uname -m=loongarch64` 或静态 ELF 判定可运行，厂商回移植内核还需具体确认。参见 [Go 官方 LoongArch 说明](https://go.dev/doc/go1.19#loong64) 和 [AOSC 新旧世界兼容层说明](https://aosc.io/liblol)。
 
-交付前应按“系统版本/补丁 + 架构/ABI + Qt/Go 工具链”分别产包，在目标桌面验证安装升级卸载、`jms://`、OAuth/凭据恢复、SSH/RDP/VNC/远程应用。推荐先覆盖 x86_64 / ARM64 的 UOS 与麒麟，再分别落地 LoongArch 新世界、旧世界和 MIPS64EL。
+交付前应按“系统版本/补丁 + 架构/ABI + Qt/Go 工具链”分别产包，在目标桌面验证安装升级卸载、`jms://`、OAuth/凭据恢复、SSH/RDP/VNC/远程应用。麒麟 V10 SP1 arm64 已有独立构建，仍需实机验收；随后覆盖 x86_64 / ARM64 的 UOS 与麒麟其它版本，再分别落地 LoongArch 新世界、旧世界和 MIPS64EL。
 
 ## Go 工具链基线
 
@@ -62,7 +62,7 @@ cmake -S . -B build-win-legacy -DCLIENT_QT_MAJOR=5 \
 
 此示例表达工具链组合方式，不表示该组合已经在目标系统验收。不要只降低 `CMAKE_OSX_DEPLOYMENT_TARGET` 就声称旧 macOS 兼容：Qt 动态库、SDK API 和 Go 运行时也必须满足下限。
 
-macOS 编译显式指定目标下限，并检查包内每个二进制的架构、依赖和最低系统版本。当前 `dist/current/` 两份 DMG 使用源码 Qt 5.15.19 和 Go 1.21.13，Intel/ARM 包内最高 minOS 分别为 10.15/11.0，不再包含 Homebrew 库。此前要求 macOS 27 的开发包已随历史产物移出交付目录；当前验证结果见 [验证记录](validation.md)。可复现命令及验证边界见 [macOS 兼容构建](../packaging/macos-compat.md)。
+macOS 编译显式指定目标下限，并检查包内每个二进制的架构、依赖和最低系统版本。当前 `dist/current/` 两份 DMG 使用源码 Qt 5.15.19 和 Go 1.21.13，Intel/ARM 包内最高 minOS 分别为 10.15/11.0，不再包含 Homebrew 库。此前要求 macOS 27 的开发包已随历史产物移出交付目录。可复现命令及验证边界见 [macOS 兼容构建](../packaging/macos-compat.md)。
 
 ## Linux 打包
 

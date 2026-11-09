@@ -300,7 +300,7 @@ def main():
                    for suffix in ('', '.sha256', '.manifest.json')):
                 raise RuntimeError(f'Destination exists: {output / (label + "." + extension)}')
         if not args.skip_build:
-            run([tool(args.cmake), '--build', build, '--config', args.config, '--target', 'client-qt'], 'Building Windows GUI and launchers')
+            run([tool(args.cmake), '--build', build, '--config', args.config, '--target', 'client'], 'Building Windows GUI and launchers')
         executable = build / args.config / 'client.exe'
         if not executable.is_file():
             executable = build / 'client.exe'

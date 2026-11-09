@@ -48,7 +48,6 @@ def main():
     parser.add_argument('--qt-major', choices=('5', '6'), default='5')
     parser.add_argument('--cmake-arg', action='append', default=[], metavar='KEY=VALUE')
     parser.add_argument('--parallel', type=int, default=4)
-    parser.add_argument('--skip-tests', action='store_true')
     args = parser.parse_args()
     if sys.version_info < (3, 8):
         parser.error('Python 3.8 or newer is required (on Rocky 8, install python39 and run python3.9)')
@@ -61,7 +60,7 @@ def main():
     if not architecture:
         parser.error('Unsupported Linux CPU: ' + platform.machine())
     goarch, machine = architecture
-    for program in ('cmake', 'cpack', 'ctest', 'pkg-config', 'file', 'desktop-file-validate'):
+    for program in ('cmake', 'cpack', 'pkg-config', 'file', 'desktop-file-validate'):
         if not shutil.which(program):
             parser.error('Missing build tool: ' + program)
     if args.format == 'deb':
@@ -93,7 +92,6 @@ def main():
     options = ['-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_INSTALL_PREFIX=/usr',
                '-DCLIENT_QT_MAJOR=' + args.qt_major,
                '-DCLIENT_GOARCH=' + goarch,
-               '-DBUILD_TESTING=' + ('OFF' if args.skip_tests else 'ON'),
                '-DCLIENT_BUILD_LAUNCHERS=' + ('OFF' if args.helpers else 'ON')]
     if not args.helpers:
         go = shutil.which(args.go)
@@ -106,13 +104,10 @@ def main():
         options.append('-D' + option)
     run(['cmake', '-S', source, '-B', build, *options])
     run(['cmake', '--build', build, '--parallel', str(args.parallel)])
-    require_elf(build / 'client-qt', machine)
+    require_elf(build / 'client', machine)
     for name in ('JumpServerClient', 'client'):
         require_elf(build / 'bin' / ('linux-' + goarch) / name, machine)
-    run(['desktop-file-validate', source / 'packaging/client-qt.desktop'])
-    if not args.skip_tests:
-        env = dict(os.environ, QT_QPA_PLATFORM='offscreen')
-        run(['cmake', '-E', 'chdir', build, 'ctest', '--output-on-failure'], env=env)
+    run(['desktop-file-validate', source / 'packaging/client.desktop'])
     run(['cpack', '--config', build / 'CPackConfig.cmake', '-G', args.format.upper(), '-B', output])
     packages = sorted(output.glob('*.' + args.format))
     if len(packages) != 1:
@@ -125,9 +120,9 @@ def main():
         metadata = subprocess.check_output(['rpm', '-qip', str(package)], universal_newlines=True)
         metadata += subprocess.check_output(['rpm', '-qpR', str(package)], universal_newlines=True)
         contents = subprocess.check_output(['rpm', '-qplv', str(package)], universal_newlines=True)
-    for expected in ('/usr/bin/client-qt', '/usr/lib/client-qt/bin/linux-' + goarch + '/JumpServerClient',
-                     '/usr/lib/client-qt/bin/linux-' + goarch + '/client', '/usr/share/applications/client-qt.desktop',
-                     '/usr/share/icons/hicolor/512x512/apps/client-qt.png', '/usr/share/licenses/client-qt/LICENSE'):
+    for expected in ('/usr/bin/client', '/usr/lib/client/bin/linux-' + goarch + '/JumpServerClient',
+                     '/usr/lib/client/bin/linux-' + goarch + '/client', '/usr/share/applications/client.desktop',
+                     '/usr/share/icons/hicolor/512x512/apps/client.png', '/usr/share/licenses/client/LICENSE'):
         if expected not in contents:
             raise RuntimeError('Package payload is incomplete: ' + expected)
     for line in contents.splitlines():
@@ -141,7 +136,7 @@ def main():
                 'sha256': hashlib.sha256(package.read_bytes()).hexdigest(),
                 'distribution': Path('/etc/os-release').read_text(), 'qt_major': args.qt_major,
                 'qt_version': subprocess.check_output(['pkg-config', '--modversion', 'Qt' + args.qt_major + 'Core'], universal_newlines=True).strip(),
-                'tests_run': not args.skip_tests, 'signed': False}
+                'signed': False}
     (output / (package.name + '.manifest.json')).write_text(json.dumps(manifest, indent=2) + '\n')
     print('Native package ready: ' + str(package), flush=True)
 

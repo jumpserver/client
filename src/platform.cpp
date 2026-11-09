@@ -43,7 +43,7 @@
 
 namespace {
 constexpr qint64 MaximumMessage = 1024 * 1024;
-const char *CredentialService = "com.jumpserver.client-qt.auth";
+const char *CredentialService = "com.jumpserver.client.auth";
 void setError(QString *error, const QString &message) { if (error) *error = message; }
 #ifdef Q_OS_MACOS
 CFMutableDictionaryRef credentialQuery(const QString &key) {
@@ -62,7 +62,7 @@ CFMutableDictionaryRef credentialQuery(const QString &key) {
 }
 #elif defined(CLIENT_QT_HAS_LIBSECRET)
 const SecretSchema CredentialSchema = {
-    "com.jumpserver.client-qt.auth", SECRET_SCHEMA_NONE,
+    "com.jumpserver.client.auth", SECRET_SCHEMA_NONE,
     {{"key", SECRET_SCHEMA_ATTRIBUTE_STRING}, {nullptr, SECRET_SCHEMA_ATTRIBUTE_STRING}}
 };
 #endif
@@ -521,9 +521,10 @@ Launcher::Launcher(QObject *parent, const QString &executable, const QString &co
 bool Launcher::isConnectionUrl(const QString &url) {
     if (!url.startsWith(QStringLiteral("jms://")) || url.size() > MaximumMessage) return false;
     const QByteArray encoded = url.mid(6).toLatin1();
-    const auto decoded = QByteArray::fromBase64Encoding(encoded, QByteArray::AbortOnBase64DecodingErrors);
-    if (!decoded) return false;
-    const auto doc = QJsonDocument::fromJson(decoded.decoded);
+    // fromBase64Encoding is Qt 5.15-only; fromBase64 exists on Qt 5.12 (Kylin V10 SP1).
+    const QByteArray decoded = QByteArray::fromBase64(encoded);
+    if (decoded.isEmpty()) return false;
+    const auto doc = QJsonDocument::fromJson(decoded);
     if (!doc.isObject()) return false;
     const auto object = doc.object();
     return !object.value("protocol").toString().isEmpty() || !object.value("command").toString().isEmpty();
@@ -552,7 +553,7 @@ QString Launcher::executablePath() {
     folder = QStringLiteral("linux-") + arch; executable = QStringLiteral("JumpServerClient");
 #endif
     const QString dir = QCoreApplication::applicationDirPath();
-    QStringList roots{dir + "/bin", dir + "/resources/bin", dir + "/../Resources/bin", dir + "/../Resources/resources/bin", dir + "/../lib/client-qt/bin"};
+    QStringList roots{dir + "/bin", dir + "/resources/bin", dir + "/../Resources/bin", dir + "/../Resources/resources/bin", dir + "/../lib/client/bin"};
 #ifdef CLIENT_QT_RESOURCE_DIR
     roots.append(QString::fromUtf8(CLIENT_QT_RESOURCE_DIR) + "/bin");
 #endif
@@ -604,7 +605,7 @@ void Launcher::launch(const QString &url) {
 
 SingleInstance::SingleInstance(QObject *parent, const QString &name) : QObject(parent) {
     const QByteArray identity = QCryptographicHash::hash(QDir::homePath().toUtf8(), QCryptographicHash::Sha256).toHex().left(16);
-    name_ = name.isEmpty() ? QStringLiteral("client-qt-") + QString::fromLatin1(identity) : name;
+    name_ = name.isEmpty() ? QStringLiteral("client-") + QString::fromLatin1(identity) : name;
 }
 SingleInstance::~SingleInstance() {
     if (server_) server_->close();

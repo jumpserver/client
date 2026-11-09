@@ -11,11 +11,18 @@
 | EXE + MSI | `windows-2022`，MSVC 14.44，Windows SDK 10.0.19041.0 | 官方 Qt 5.15.19 源码，Schannel | amd64；Windows 10+ |
 | EXE + MSI（手工可选） | 同上，MSVC x86 目标 | 同上 | 386；Windows 10+ |
 | DEB | `debian:11.11-slim` 容器 | 发行版 Qt 5.15.2、OpenSSL / CA 包 | amd64、arm64（aarch64）；Debian 11 用户空间 |
+| DEB（麒麟 V10 SP1） | `ubuntu:20.04` 容器，ARM64 runner | 发行版 Qt 5.12.8、OpenSSL / CA 包 | arm64（aarch64）；Qt 5.12 / glibc 2.31 用户空间 |
 | RPM | `rockylinux/rockylinux:8.10` 容器 | 发行版 Qt 5.15.3、OpenSSL / CA 包 | amd64、arm64（aarch64）；EL8 用户空间 |
+
+银河麒麟 V10 SP1 只提供 Qt 5.12.12，Debian 11 的 Qt 5.15.2 产物会因
+`libqt5core5a (>= 5.15.1)` 等依赖和 `QByteArray::fromBase64Encoding`、`QWidget::screen()`
+等 5.15 符号无法安装或启动。`linux-kylin` job 因此单独使用 Qt 5.12 基线构建，
+产出 `OSMClient-<ver>-linux-arm64-kylin.deb`。包名与安装路径统一为 `client`；
+下载文件名通过 `CLIENT_PACKAGE_VARIANT` 区分，避免与 Debian 包混淆。
 
 Linux 构建分别在 Ubuntu 24.04 x86_64 和 ARM64 runner 的发行版容器内完成，镜像固定到各架构的 digest。RPM 使用原生 `rpmbuild`，不从 DEB 转换；Qt、libsecret 等由目标发行版包管理器提供。Debian 11 security 仓库迁移到 archive 后只调整仓库 URL 和过期元数据检查，保留包签名校验。Rocky 使用官方 HTTPS baseurl，避免地理镜像同步窗口导致的 404。
 
-这些是编译/打包基线，不能代替旧系统实机验收。统信 UOS、麒麟需要分别确认发行版版本、CPU、Qt 5.15 和 libsecret 包名/ABI、桌面与 SSH/RDP 外部客户端。当前 CI 不承诺任意 UOS/麒麟版本、Windows 7/8、macOS 10.14 或其他 CPU 已兼容。其他目标可直接使用打包脚本和合适的本地工具链。Go 固定 1.21.13，沿用原项目 1.21 系列启动器基线；升级 Go 时需重新检查最低 OS 要求。
+这些是编译/打包基线，不能代替旧系统实机验收。统信 UOS 及其它麒麟版本仍需分别确认发行版版本、CPU、Qt 和 libsecret 包名/ABI、桌面与 SSH/RDP 外部客户端。当前 CI 只对麒麟 V10 SP1 arm64 提供 Qt 5.12 专用包，不承诺 UOS、其它麒麟版本、Windows 7/8、macOS 10.14 或其他 CPU 已兼容。其他目标可直接使用打包脚本和合适的本地工具链。Go 固定 1.21.13，沿用原项目 1.21 系列启动器基线；升级 Go 时需重新检查最低 OS 要求。
 
 ## 版本、签名与凭据
 
@@ -45,13 +52,13 @@ macOS 沿用原 `clients` 的 Secrets 名称：
 
 Action 均固定到完整 commit SHA，并注释对应版本。构建工具固定 Python 3.12.10、CMake 3.31.6、Ninja 1.11.1.4、Go 1.21.13；Windows 校验 runner 内 WiX 3.14.1 与 NSIS 3.10，不匹配会失败并要求更新配置。Qt 源码下载地址、SHA256 和 Windows jom 1.1.4 哈希在 `scripts/build-qt.py` 中固定。
 
-macOS/Windows 编译 Qt Base、Qt SVG、部署工具，关闭不用的 OpenGL、数据库驱动和 Qt Tools，保留 Qt Test 库。Qt 使用共享库；Windows 使用系统 Schannel，macOS 使用系统 Secure Transport，避免捆绑旧 OpenSSL 运行库或 Homebrew 的高版本最低 OS 依赖。固定 Xcode/SDK 与部署目标同时传给 Qt 和应用。
+macOS/Windows 编译 Qt Base、Qt SVG、部署工具，关闭不用的 OpenGL、数据库驱动和 Qt Tools。Qt 使用共享库；Windows 使用系统 Schannel，macOS 使用系统 Secure Transport，避免捆绑旧 OpenSSL 运行库或 Homebrew 的高版本最低 OS 依赖。固定 Xcode/SDK 与部署目标同时传给 Qt 和应用。
 
 首次源码构建耗时较长，job 给 macOS 150 分钟、Windows 180 分钟。后续缓存安装后的 Qt 前缀，cache key 包含 Qt 版本、平台、架构、编译器/SDK或部署目标以及整个构建脚本的哈希；没有宽泛回退 key。构建脚本也校验完成标记、Qt SVG/Test 和部署工具是否齐全。需要重试不完整的本地 Qt 构建时，请使用新的 `--prefix`、`--work` 目录，脚本不会自动删除已有安装。
 
 ## 验证范围
 
-流水线通过 `BUILD_TESTING=OFF` 只构建、打包和校验安装包，不编译测试程序，也不运行 CTest、Go 单元测试或离线打包回归测试（`tests/` 保留供本地验证）。Linux 在第二个干净容器中安装生成的包，检查依赖、MIME 注册、有效载荷及 `--smoke-test`。Windows 在一次性 GitHub-hosted runner 上验证 EXE/MSI 安装、安装后启动、正常卸载，以及其他应用接管 `jms` 后卸载仍保留该处理器。macOS 打包脚本检查 Mach-O 依赖和签名；签名任务另外执行 Apple 公证及 stapler 验证。
+流水线只构建、打包和校验安装包，不编译或运行测试程序。Linux 在第二个干净容器中安装生成的包，检查依赖、MIME 注册、有效载荷及 `--smoke-test`。Windows 在一次性 GitHub-hosted runner 上验证 EXE/MSI 安装、安装后启动、正常卸载，以及其他应用接管 `jms` 后卸载仍保留该处理器。macOS 打包脚本检查 Mach-O 依赖和签名；签名任务另外执行 Apple 公证及 stapler 验证。
 
 GitHub macOS hosted runner 偶发 `hdiutil create - Resource busy` 时，DMG 创建最多尝试 10 次（失败后间隔 5 秒，最多 9 次重试），仅清理本次未完成的目标文件；之后仍执行镜像校验、挂载检查、依赖检查及可用的启动 smoke test，不降低安装包的验证范围。
 
@@ -59,9 +66,9 @@ GitHub macOS hosted runner 偶发 `hdiutil create - Resource busy` 时，DMG 创
 
 Release 标签由 `scripts/ci-version.py` 的 `release_tag` 输出决定：标签推送用 `github.ref_name`（如 `v4.1.5`）；手工运行用 `v<version>`，`version` 输入框留空则取 CMake `CLIENT_VERSION` 默认值。`target_commitish` 固定为触发本次 run 的 `github.sha`，避免手工跑 `osm-qt` 分支时把标签指到默认分支 `dev`。同一标签重跑会复用已有 Release 并覆盖同名 assets；`draft: true` 显式设置，即使该标签原本已发布也会被更新回 draft。手工运行每次都会发/覆盖这个 `v<version>` Release，因此用同一版本号重复跑会持续覆盖；要保留历史版本需换 `version` 输入或改用新标签。
 
-本地已通过 actionlint、36 项打包回归，完成官方 Qt 5.15.19 的 arm64/x86_64 源码构建及两种应用构建。独立 Qt 5 与 Qt 6 的 CTest 各 5/5 通过。两个打包阶段强制逐个 Mach-O 检查架构、依赖和 minOS，并写入目标系统版本，超标立即失败。原生 ARM DMG 完成挂载内 Cocoa smoke；Intel 在无 Rosetta 的 ARM 主机交叉构建，显式记录未执行启动检查。复现说明见 [macOS 兼容构建](macos-compat.md)。
+本地已通过 actionlint，完成官方 Qt 5.15.19 的 arm64/x86_64 源码构建及两种应用构建。两个打包阶段强制逐个 Mach-O 检查架构、依赖和 minOS，并写入目标系统版本，超标立即失败。原生 ARM DMG 完成挂载内 Cocoa smoke；Intel 在无 Rosetta 的 ARM 主机交叉构建，显式记录未执行启动检查。复现说明见 [macOS 兼容构建](macos-compat.md)。
 
-此次本机使用 Apple clang 21/Command Line Tools；源码构建产生的旧部署目标警告不代表旧系统已实测。项目尚未发布到 GitHub，本轮没有运行 GitHub Actions；固定 Xcode/MSVC 的 CI 构建、Windows 安装验证、真实签名/公证和 macOS 10.15/11 实机仍待验收。当前兼容包位于 `dist/current/`；历史开发包已清理，最新结果见 [验证记录](../docs/validation.md)。
+此次本机使用 Apple clang 21/Command Line Tools；源码构建产生的旧部署目标警告不代表旧系统已实测。项目尚未发布到 GitHub，本轮没有运行 GitHub Actions；固定 Xcode/MSVC 的 CI 构建、Windows 安装验证、真实签名/公证和 macOS 10.15/11 实机仍待验收。当前兼容包位于 `dist/current/`；历史开发包已清理。
 
 参考官方来源：
 

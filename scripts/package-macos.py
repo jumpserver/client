@@ -114,7 +114,7 @@ def copy_dependency(source, frameworks):
 
 
 def repair_dependencies(bundle, search_paths):
-    executable = bundle / 'Contents/MacOS/client-qt'
+    executable = bundle / 'Contents/MacOS/client'
     frameworks = bundle / 'Contents/Frameworks'
     frameworks.mkdir(parents=True, exist_ok=True)
     processed = set()
@@ -150,7 +150,7 @@ def repair_dependencies(bundle, search_paths):
 
 
 def audit_bundle(bundle):
-    executable = bundle / 'Contents/MacOS/client-qt'
+    executable = bundle / 'Contents/MacOS/client'
     architecture = subprocess.check_output(['lipo', '-archs', str(executable)], text=True).strip()
     if architecture not in ('arm64', 'x86_64'):
         raise RuntimeError('Expected a single macOS application architecture')
@@ -186,7 +186,7 @@ def audit_bundle(bundle):
 def sign_bundle(bundle, release=False):
     # Sign nested code first, then framework resource seals, then the outer app.
     entitlements = Path(__file__).resolve().parents[1] / 'packaging/entitlements.macos.plist'
-    main_executable = bundle / 'Contents/MacOS/client-qt'
+    main_executable = bundle / 'Contents/MacOS/client'
     for path in macho_files(bundle):
         if path == main_executable:
             continue # Signing this path also seals its enclosing app bundle.
@@ -227,7 +227,7 @@ def main():
     if platform.system() != 'Darwin':
         parser.error('Run this on the macOS build host')
     args.sign = resolve_signing(args.sign)
-    source = args.build.resolve() / 'client-qt.app'
+    source = args.build.resolve() / 'client.app'
     destination = args.output.resolve()
     if destination.exists():
         parser.error(f'Output exists; choose a fresh output path: {destination}')

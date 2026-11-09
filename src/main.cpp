@@ -7,7 +7,10 @@
 #endif
 #include <QApplication>
 #include <QFileOpenEvent>
+#include <QFile>
+#include <QFileInfo>
 #include <QIcon>
+#include <QLibraryInfo>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -16,6 +19,28 @@
 #include <QTimer>
 #include <QTemporaryDir>
 #include <functional>
+
+#if defined(Q_OS_LINUX)
+static bool isKylinOs() {
+  QFile release(QStringLiteral("/etc/os-release"));
+  if (!release.open(QIODevice::ReadOnly)) return false;
+  return release.readAll().contains("ID=kylin");
+}
+
+static void preferKylinPlatformTheme() {
+  if (!qEnvironmentVariableIsEmpty("QT_QPA_PLATFORMTHEME")) return;
+  const QString desktop = qEnvironmentVariable("XDG_CURRENT_DESKTOP");
+  const bool ukui = desktop.contains("UKUI", Qt::CaseInsensitive) ||
+                    qEnvironmentVariable("DESKTOP_SESSION").compare("ukui", Qt::CaseInsensitive) == 0;
+  if (!ukui && !isKylinOs()) return;
+  const QString plugin = QLibraryInfo::location(QLibraryInfo::PluginsPath) +
+                         QStringLiteral("/platformthemes/libqt5-ukui-platformtheme.so");
+  if (!QFileInfo::exists(plugin)) return;
+  // Kylin V10's Qt 5.12 falls back to the generic Unix theme when no platform
+  // theme is selected, which aborts with GLib >= 2.64 on gsettings teardown.
+  qputenv("QT_QPA_PLATFORMTHEME", "ukui");
+}
+#endif
 
 class ClientApplication : public QApplication {
 public:
@@ -42,6 +67,9 @@ public:
 
 int main(int argc, char **argv)
 {
+#if defined(Q_OS_LINUX)
+    preferKylinPlatformTheme();
+#endif
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QCoreApplication::setAttribute(Qt::AA_DisableWindowContextHelpButton);
 #endif
@@ -55,8 +83,7 @@ int main(int argc, char **argv)
 #endif
     QCoreApplication::setOrganizationName("FIT2CLOUD");
     QCoreApplication::setOrganizationDomain("fit2cloud.com");
-    // Preserve the existing settings namespace while updating the visible brand.
-    QCoreApplication::setApplicationName("client-qt");
+    QCoreApplication::setApplicationName("client");
     QApplication::setApplicationDisplayName("OSMClient");
     QCoreApplication::setApplicationVersion(CLIENT_QT_VERSION);
     QApplication::setWindowIcon(ClientTheme::applicationIcon());
@@ -66,7 +93,7 @@ int main(int argc, char **argv)
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, smokeDirectory.path());
     }
-    SingleInstance instance(nullptr, smoke ? "client-qt-smoke" : QString());
+    SingleInstance instance(nullptr, smoke ? "client-smoke" : QString());
     if (!instance.start(app.arguments())) {
         if (!instance.error().isEmpty()) {
             qCritical("Cannot start client instance");

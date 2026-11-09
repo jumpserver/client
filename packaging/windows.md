@@ -57,14 +57,10 @@ MSI 的 ICE 一致性校验限定了 authoring 位置，只用结构调整满足
 
 **旧系统兼容由 Qt、C++/CRT、Go、OpenSSL 的实际构建工具链共同决定**，EXE/MSI 扩展名和安装器的 Windows 7 下限不能降低程序本身的系统要求。Windows 7/8 的 Go helper 需要相应旧工具链（Go 1.20 为最后支持线），Qt 6 与现代 CRT/SDK 应单独建立较新系统包；不能把当前 CI 包宣称为 Windows 7 已验证包。
 
-当前 macOS 开发机已验证 Python 行为测试、两架构 NSIS 模板编译及保护 DLL 的 x86/x64 交叉编译；测试安装器使用显式 synthetic payload 并自动删除。**Windows Qt 部署、最终 WiX 编译、真实 PFX 签名、安装/升级/卸载、协议接管保护和旧 Windows 实机运行仍需 Windows 环境验证。**
+当前 macOS 开发机已验证两架构 NSIS 模板编译及保护 DLL 的 x86/x64 交叉编译；验证安装器使用显式 synthetic payload 并自动删除。**Windows Qt 部署、最终 WiX 编译、真实 PFX 签名、安装/升级/卸载、协议接管保护和旧 Windows 实机运行仍需 Windows 环境验证。**
 
 CI 使用 Qt 5.15.19 源码和 Schannel（`--native-tls`）、VS2022、NSIS 3.10、WiX 3.14.1。工作流构建之后调用以下检查：分别静默安装 EXE/MSI，运行已安装程序 smoke test，再验证正常卸载与另一客户端接管 `jms` 后卸载的保留行为。此脚本会改测试注册表，仅允许无预存安装/`jms` 注册的 GitHub 托管一次性 Windows runner；提供脚本不表示已在本机执行通过。
 
 ```powershell
 ./packaging/windows/verify-installed.ps1 -Dist dist -Arch amd64
-```
-
-```sh
-python -m unittest discover -s tests -p 'test_packaging*.py'
 ```

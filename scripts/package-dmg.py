@@ -100,7 +100,7 @@ def detach_mount(mount):
 
 @contextmanager
 def workspace():
-    root = Path(tempfile.mkdtemp(prefix='client-qt-dmg-'))
+    root = Path(tempfile.mkdtemp(prefix='client-dmg-'))
     try:
         yield root
     finally:
@@ -139,7 +139,7 @@ def main():
     schemes = [scheme for item in info.get('CFBundleURLTypes', []) for scheme in item.get('CFBundleURLSchemes', [])]
     if 'jms' not in schemes:
         parser.error('The app does not declare its jms URL handler')
-    architecture = run(['lipo', '-archs', str(source / 'Contents/MacOS/client-qt')]).strip()
+    architecture = run(['lipo', '-archs', str(source / 'Contents/MacOS/client')]).strip()
     folders = list((source / 'Contents/Resources/bin').glob('darwin-*'))
     expected = {'arm64': 'arm64', 'x86_64': 'amd64'}.get(architecture)
     if not expected or len(folders) != 1 or folders[0].name != 'darwin-' + expected:

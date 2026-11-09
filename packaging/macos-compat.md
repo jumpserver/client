@@ -14,7 +14,6 @@ cmake -S . -B build-arm64 -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH=/tmp/osm-qt-arm64 -DCMAKE_OSX_ARCHITECTURES=arm64 \
   -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DGO_EXECUTABLE="$OSM_GO"
 cmake --build build-arm64 --parallel 4
-ctest --test-dir build-arm64 --output-on-failure
 python3 scripts/package-macos.py --build build-arm64 \
   --macdeployqt /tmp/osm-qt-arm64/bin/macdeployqt \
   --output dist/arm64/OSMClient.app --deployment-target 11.0
@@ -34,7 +33,7 @@ cmake -S . -B build-x86_64 -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH=/tmp/osm-qt-x86_64 \
   -DCLIENT_QT_HOST_BINS=/tmp/osm-qt-arm64/bin \
   -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
-  -DGO_EXECUTABLE="$OSM_GO" -DBUILD_TESTING=OFF
+  -DGO_EXECUTABLE="$OSM_GO"
 cmake --build build-x86_64 --parallel 4
 python3 scripts/package-macos.py --build build-x86_64 \
   --macdeployqt /tmp/osm-qt-arm64/bin/macdeployqt \

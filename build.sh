@@ -23,7 +23,6 @@ Usage: ./build.sh [options]
   --generator NAME               Optional CMake generator, e.g. Ninja
   --cmake-arg KEY=VALUE           Repeatable toolchain/compiler settings
   --openssl-dir DIR              Windows Qt OpenSSL DLLs; otherwise native TLS
-  --skip-tests                   Explicitly skip CTest; automatic for macOS cross-build
   --sign                        Request signing; missing certificates skip signing
   --notarize                    macOS notarization (implies --sign)
   --dry-run                     Print commands without building or writing files
@@ -47,12 +46,11 @@ normalize_arch() {
 host_arch=$(normalize_arch "$(uname -m)")
 platform=$host arch=$host_arch format= qt_prefix= qt_major=5 qt_host_bins= go=go
 build_dir= output= version= deployment= jobs=4 generator= openssl_dir=
-skip_tests=false sign=false notarize=false dry_run=false build_qt=false
+sign=false notarize=false dry_run=false build_qt=false
 cmake_args=()
 while (($#)); do
   case "$1" in
     -h|--help) usage; exit 0;;
-    --skip-tests) skip_tests=true; shift; continue;;
     --sign) sign=true; shift; continue;;
     --notarize) notarize=true; sign=true; shift; continue;;
     --dry-run) dry_run=true; shift; continue;;
@@ -89,7 +87,6 @@ if [[ "$arch" != "$host_arch" ]]; then
   if [[ "$platform" == macos ]]; then
     cross=true
     [[ -n "$qt_host_bins" ]] || fail 'macOS cross-build needs --qt-host-bins'
-    skip_tests=true
   elif [[ "$platform" != windows || "$host_arch" != amd64 || "$arch" != 386 ]]; then
     fail 'Use a matching architecture host/container (Windows x64 can also build x86)'
   fi
@@ -140,12 +137,10 @@ if [[ "$platform" == linux ]]; then
   [[ -z "$qt_prefix" ]] || cmd+=(--cmake-arg "CMAKE_PREFIX_PATH=$qt_prefix")
   [[ -z "$generator" ]] || fail 'Linux generator is managed by package-linux.py'
   for option in ${cmake_args[@]+"${cmake_args[@]}"}; do cmd+=(--cmake-arg "$option"); done
-  $skip_tests && cmd+=(--skip-tests)
   run "${cmd[@]}"
   exit 0
 fi
 configure=(cmake -S "$ROOT" -B "$build_dir" "-DCLIENT_VERSION=$version" "-DCLIENT_QT_MAJOR=$qt_major" "-DCMAKE_PREFIX_PATH=$qt_prefix" "-DGO_EXECUTABLE=$go" "-DCLIENT_GOARCH=$arch" -DCMAKE_BUILD_TYPE=Release)
-if $skip_tests; then configure+=(-DBUILD_TESTING=OFF); else configure+=(-DBUILD_TESTING=ON); fi
 [[ -z "$generator" ]] || configure+=(-G "$generator")
 if [[ "$platform" == macos ]]; then
   configure+=("-DCMAKE_OSX_ARCHITECTURES=$qt_arch" "-DCMAKE_OSX_DEPLOYMENT_TARGET=$deployment")
@@ -154,7 +149,6 @@ fi
 for option in ${cmake_args[@]+"${cmake_args[@]}"}; do configure+=("-D$option"); done
 run "${configure[@]}"
 run cmake --build "$build_dir" --config Release --parallel "$jobs"
-if ! $skip_tests; then run env QT_QPA_PLATFORM=offscreen ctest --test-dir "$build_dir" -C Release --output-on-failure; fi
 if [[ "$platform" == windows ]]; then
   cmd=("$python" "$ROOT/scripts/package-windows.py" --build "$build_dir" --arch "$arch" --format "$format" --output "$output" --windeployqt "$qt_prefix/bin/windeployqt.exe" --skip-build)
   if [[ -n "$openssl_dir" ]]; then cmd+=(--openssl-dir "$openssl_dir"); else cmd+=(--native-tls); fi

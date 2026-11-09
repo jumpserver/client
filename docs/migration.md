@@ -2,17 +2,17 @@
 
 基线：`clients` 仓库 `osm` 分支，commit `30edaf4a`。原仓库及 `mygo-poc` 保持不变，新项目可以单独构建。
 
-| 原项目职责 | Qt 实现 | 验证方式 |
+| 原项目职责 | Qt 实现 | 实现说明 |
 | --- | --- | --- |
 | Rust OAuth/token/http_callback | `src/appservice.*` | HTTP mock：PKCE、state、回调、刷新并发、取消、失效响应与撤销 |
 | Rust assets/detail/favorite/rename | `src/appservice.*` | 授权资产接口、合并类型分页、组织切换隔离、收藏请求 |
-| Rust connect_methods/settings/version/token | `src/appservice.*` | 令牌请求与原始 JMS 返回值测试 |
-| Vue 资产页、侧栏、右键菜单 | `src/mainwindow.*` | Qt Test 与离线截图 |
+| Rust connect_methods/settings/version/token | `src/appservice.*` | 令牌请求与原始 JMS 返回值保真 |
+| Vue 资产页、侧栏、右键菜单 | `src/mainwindow.*` | 手工界面检查 |
 | Vue 连接弹窗、资产连接偏好 | `src/connectiondialog.*` | 手工/同名/托管账号、协议与方式过滤、RDP 参数、偏好隔离 |
-| Vue 通用/外观/应用/关于设置 | `src/settingsdialog.*`、`src/theme.*` | UI 测试与人工界面检查 |
+| Vue 通用/外观/应用/关于设置 | `src/settingsdialog.*`、`src/theme.*` | 人工界面检查 |
 | Rust pull_up + Go launcher | `src/platform.*` + 原 `go-client/` | 真实子进程参数透传、退出/错误检测、Go 交叉编译 |
-| Tauri deep link / 单实例 | `src/main.cpp`、`src/platform.*`、macOS `src/protocol_events.mm` | IPC 测试、原始 JMS 保真；安装后的系统协议关联另需实机验证 |
-| keyring / 配置 | `CredentialStore`、`ConfigStore` | 合并、原子保存、损坏保留；可选系统凭据往返测试 |
+| Tauri deep link / 单实例 | `src/main.cpp`、`src/platform.*`、macOS `src/protocol_events.mm` | IPC 与原始 JMS 保真；安装后的系统协议关联需实机验证 |
+| keyring / 配置 | `CredentialStore`、`ConfigStore` | 合并、原子保存、损坏保留；系统凭据读写 |
 
 ## 接口与兼容约定
 
@@ -36,6 +36,6 @@
 
 ## 验收范围
 
-自动测试覆盖的是可控的协议与交互行为。真实 OAuth 站点、权限/许可证组合、第三方 SSH/RDP/VNC/数据库客户端及各系统的浏览器回调，必须使用授权测试环境逐项验收。当前没有把 mock 测试结果表述为真实资产连接成功。
+真实 OAuth 站点、权限/许可证组合、第三方 SSH/RDP/VNC/数据库客户端及各系统的浏览器回调，必须使用授权测试环境逐项验收。
 
 验收顺序：安装并注册协议 → 冷启动回调 → 运行中回调/单实例 → 登录/刷新/退出 → 切换站点与组织 → 各资产分类/收藏/重命名 → 各账号模式与协议 → 保存/撤销输入凭据 → 客户端缺失/启动失败 → 升级保留配置。

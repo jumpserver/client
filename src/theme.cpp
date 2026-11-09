@@ -9,6 +9,7 @@
 #include <QPainter>
 #include <QFontMetrics>
 #include <QScreen>
+#include <QWindow>
 #include <QSettings>
 #include <QResizeEvent>
 #include <QStyle>
@@ -18,8 +19,16 @@
 
 QRect ClientTheme::dialogAvailableGeometry(const QWidget *dialog, bool initialPlacement) {
   const QWidget *owner = dialog->parentWidget() ? dialog->parentWidget()->window() : nullptr;
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
   QScreen *screen = initialPlacement && owner ? owner->screen() : dialog->screen();
   return screen->availableGeometry();
+#else
+  // QWidget::screen() is Qt 5.14+; keep Kylin V10 SP1 (Qt 5.12) buildable.
+  const QWidget *anchor = initialPlacement && owner ? owner : dialog;
+  const QScreen *screen = anchor->windowHandle() ? anchor->windowHandle()->screen()
+                                                 : QGuiApplication::primaryScreen();
+  return screen ? screen->availableGeometry() : QRect();
+#endif
 }
 
 void ClientTheme::positionDialog(QWidget *dialog, bool initialPlacement) {
@@ -222,7 +231,12 @@ void ComboBox::showPopup() {
   option.fontMetrics = QFontMetrics(font());
   for (int row = 0; row < count(); ++row)
     popupWidth = qMax(popupWidth, itemDelegate()->sizeHint(option, model()->index(row, modelColumn(), rootModelIndex())).width() + 16);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
   const int available = screen() ? screen()->availableGeometry().width() - 24 : popupWidth;
+#else
+  const QScreen *target = windowHandle() ? windowHandle()->screen() : QGuiApplication::primaryScreen();
+  const int available = target ? target->availableGeometry().width() - 24 : popupWidth;
+#endif
   view()->setMinimumWidth(qMin(popupWidth, qMax(1, available)));
   QComboBox::showPopup();
 }
