@@ -21,11 +21,14 @@ class ClientApplication : public QApplication {
 public:
     using QApplication::QApplication;
     std::function<void(QString)> openUrl;
+    std::function<void()> onActivate;
     QStringList queued;
     void receiveUrl(const QString &url) {
         if (openUrl) openUrl(url); else queued.append(url);
     }
     bool event(QEvent *event) override {
+        if (event->type() == QEvent::ApplicationActivate && onActivate)
+            onActivate();
         if (event->type() == QEvent::FileOpen) {
             const QUrl url = static_cast<QFileOpenEvent *>(event)->url();
             // Opaque JMS payloads must never be round-tripped through QUrl.
@@ -75,7 +78,24 @@ int main(int argc, char **argv)
     AppService service;
     Launcher launcher;
     MainWindow window(&service, &config, &launcher);
-    auto raiseWindow = [&window] { window.showNormal(); window.raise(); window.activateWindow(); };
+    auto raiseWindow = [&window] {
+        if (window.windowState().testFlag(Qt::WindowMinimized))
+            window.showNormal();
+        else
+            window.show();
+        window.raise();
+        window.activateWindow();
+        QTimer::singleShot(0, &window, [&window] {
+            window.raise();
+            window.activateWindow();
+        });
+    };
+#ifdef Q_OS_MACOS
+    app.onActivate = [&window, raiseWindow] {
+        if (!QApplication::activeWindow() && !window.isVisible()) raiseWindow();
+        else if (window.windowState().testFlag(Qt::WindowMinimized)) raiseWindow();
+    };
+#endif
     auto route = [&window](const QString &url) {
         if (url.startsWith("jms://", Qt::CaseInsensitive)) window.handleUrl(url);
     };

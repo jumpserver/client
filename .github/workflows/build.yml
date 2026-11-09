@@ -242,20 +242,33 @@ jobs:
 
   linux:
     needs: metadata
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
           - format: deb
+            arch: amd64
+            runner: ubuntu-24.04
             image: debian:11.11-slim@sha256:70509c95d1857a3704c0a5d92ee2e0adac95f612a9386889d70760bfd7c1ebba
           - format: rpm
+            arch: amd64
+            runner: ubuntu-24.04
             image: rockylinux/rockylinux:8.10@sha256:f5529992e67440c1a4ae7788244d4381c6909159a88eacd95b7523ae47ced82e
+          - format: deb
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            image: debian:11.11-slim@sha256:29e60bc6b8355ce47307cecadb843f25c9a1ee332ed8458039cc435262677bdc
+          - format: rpm
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            image: rockylinux/rockylinux:8.10@sha256:f514765516176a9aa4729ee83964e5a1900df95fd4bc7182cca64c7199b7eec7
     env:
       CLIENT_VERSION: ${{ needs.metadata.outputs.version }}
       BUILD_IMAGE: ${{ matrix.image }}
       PACKAGE_FORMAT: ${{ matrix.format }}
+      TARGET_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -268,11 +281,11 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: go-client/go.sum
       - name: Build target Go launchers
-        run: python scripts/build-launchers.py --goos linux --goarch amd64 --output helpers
+        run: python scripts/build-launchers.py --goos linux --goarch "$TARGET_ARCH" --output helpers
       - name: Build native package in distribution container
         run: |
           mkdir -p dist
-          docker run --rm --platform linux/amd64 -e CLIENT_VERSION -e PACKAGE_FORMAT -v "$PWD:/src:ro" -v "$PWD/helpers:/helpers:ro" -v "$PWD/dist:/out" "$BUILD_IMAGE" sh -ec '
+          docker run --rm --platform "linux/$TARGET_ARCH" -e CLIENT_VERSION -e PACKAGE_FORMAT -v "$PWD:/src:ro" -v "$PWD/helpers:/helpers:ro" -v "$PWD/dist:/out" "$BUILD_IMAGE" sh -ec '
             if [ "$PACKAGE_FORMAT" = deb ]; then
               sed -i "s|deb.debian.org/debian-security|archive.debian.org/debian-security|g" /etc/apt/sources.list
               apt-get -o Acquire::Check-Valid-Until=false update
@@ -287,7 +300,7 @@ jobs:
           '
       - name: Install and smoke-test in clean runtime container
         run: |
-          docker run --rm --platform linux/amd64 -e PACKAGE_FORMAT -v "$PWD:/src:ro" -v "$PWD/dist:/out:ro" "$BUILD_IMAGE" sh -ec '
+          docker run --rm --platform "linux/$TARGET_ARCH" -e PACKAGE_FORMAT -v "$PWD:/src:ro" -v "$PWD/dist:/out:ro" "$BUILD_IMAGE" sh -ec '
             if [ "$PACKAGE_FORMAT" = deb ]; then
               sed -i "s|deb.debian.org/debian-security|archive.debian.org/debian-security|g" /etc/apt/sources.list
               apt-get -o Acquire::Check-Valid-Until=false update
@@ -300,7 +313,7 @@ jobs:
           '
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: OSMClient-${{ needs.metadata.outputs.version }}-linux-amd64-${{ matrix.format }}
+          name: OSMClient-${{ needs.metadata.outputs.version }}-linux-${{ matrix.arch }}-${{ matrix.format }}
           path: |
             dist/*.${{ matrix.format }}
             dist/*.manifest.json
@@ -331,15 +344,30 @@ jobs:
               exit 1
             fi
           done
+          for arch in amd64 arm64; do
+            for extension in deb rpm; do
+              test -f "release-assets/OSMClient-${CLIENT_VERSION}-linux-${arch}.${extension}" || {
+                echo "Missing Linux ${arch} ${extension} installer" >&2
+                exit 1
+              }
+            done
+          done
+        env:
+          CLIENT_VERSION: ${{ needs.metadata.outputs.version }}
       - uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2.4.2
         with:
           tag_name: ${{ needs.metadata.outputs.release_tag }}
-          name: OSMClient ${{ needs.metadata.outputs.release_tag }}
+          name: ${{ needs.metadata.outputs.release_tag }}
           target_commitish: ${{ github.sha }}
-          draft: true
-          prerelease: false
+          draft: false
+          prerelease: true
           generate_release_notes: true
-          files: release-assets/*
+          files: |
+            release-assets/*.dmg
+            release-assets/*.exe
+            release-assets/*.msi
+            release-assets/*.deb
+            release-assets/*.rpm
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

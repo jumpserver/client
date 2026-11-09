@@ -10,10 +10,10 @@
 | DMG | `macos-15`，Xcode 16.4 | 同上 | arm64；部署目标 macOS 11.0 |
 | EXE + MSI | `windows-2022`，MSVC 14.44，Windows SDK 10.0.19041.0 | 官方 Qt 5.15.19 源码，Schannel | amd64；Windows 10+ |
 | EXE + MSI（手工可选） | 同上，MSVC x86 目标 | 同上 | 386；Windows 10+ |
-| DEB | `debian:11.11-slim` 容器 | 发行版 Qt 5.15.2、OpenSSL / CA 包 | amd64；Debian 11 用户空间 |
-| RPM | `rockylinux/rockylinux:8.10` 容器 | 发行版 Qt 5.15.3、OpenSSL / CA 包 | amd64；EL8 用户空间 |
+| DEB | `debian:11.11-slim` 容器 | 发行版 Qt 5.15.2、OpenSSL / CA 包 | amd64、arm64（aarch64）；Debian 11 用户空间 |
+| RPM | `rockylinux/rockylinux:8.10` 容器 | 发行版 Qt 5.15.3、OpenSSL / CA 包 | amd64、arm64（aarch64）；EL8 用户空间 |
 
-Linux 构建在 Ubuntu 24.04 runner 的发行版容器内完成，镜像固定到已查询的 amd64 digest。RPM 使用原生 `rpmbuild`，不从 DEB 转换；Qt、libsecret 等由目标发行版包管理器提供。Debian 11 security 仓库迁移到 archive 后只调整仓库 URL 和过期元数据检查，保留包签名校验。Rocky 使用官方 HTTPS baseurl，避免地理镜像同步窗口导致的 404。
+Linux 构建分别在 Ubuntu 24.04 x86_64 和 ARM64 runner 的发行版容器内完成，镜像固定到各架构的 digest。RPM 使用原生 `rpmbuild`，不从 DEB 转换；Qt、libsecret 等由目标发行版包管理器提供。Debian 11 security 仓库迁移到 archive 后只调整仓库 URL 和过期元数据检查，保留包签名校验。Rocky 使用官方 HTTPS baseurl，避免地理镜像同步窗口导致的 404。
 
 这些是编译/打包基线，不能代替旧系统实机验收。统信 UOS、麒麟需要分别确认发行版版本、CPU、Qt 5.15 和 libsecret 包名/ABI、桌面与 SSH/RDP 外部客户端。当前 CI 不承诺任意 UOS/麒麟版本、Windows 7/8、macOS 10.14 或其他 CPU 已兼容。其他目标可直接使用打包脚本和合适的本地工具链。Go 固定 1.21.13，沿用原项目 1.21 系列启动器基线；升级 Go 时需重新检查最低 OS 要求。
 
@@ -55,7 +55,7 @@ macOS/Windows 编译 Qt Base、Qt SVG、部署工具，关闭不用的 OpenGL、
 
 GitHub macOS hosted runner 偶发 `hdiutil create - Resource busy` 时，DMG 创建最多尝试 10 次（失败后间隔 5 秒，最多 9 次重试），仅清理本次未完成的目标文件；之后仍执行镜像校验、挂载检查、依赖检查及可用的启动 smoke test，不降低安装包的验证范围。
 
-`release` job 依赖全部构建 job 成功；任一平台构建失败则整个 release job 跳过，不会产出残缺 Release。它先校验 dmg/exe/msi/deb/rpm 五类安装包齐全，再用 `softprops/action-gh-release` 创建 **draft** Release（生成 release notes、不设为 latest），安装包和各 `.manifest.json` 校验文件作为 assets 上传。draft 不会对外可见，需要维护者在 Releases 页面人工确认后手动 publish。
+`release` job 依赖全部构建 job 成功；任一平台构建失败则整个 release job 跳过，不会产出残缺 Release。它先校验 dmg/exe/msi/deb/rpm 五类安装包及 amd64、arm64 的 DEB/RPM 齐全，再用 `softprops/action-gh-release` 创建 **draft** Release（生成 release notes、不设为 latest）。Release 只上传这五类安装包；manifest 和 metadata 保留在 Actions artifacts 中。draft 不会对外可见，需要维护者在 Releases 页面人工确认后手动 publish。
 
 Release 标签由 `scripts/ci-version.py` 的 `release_tag` 输出决定：标签推送用 `github.ref_name`（如 `v4.1.5`）；手工运行用 `v<version>`，`version` 输入框留空则取 CMake `CLIENT_VERSION` 默认值。`target_commitish` 固定为触发本次 run 的 `github.sha`，避免手工跑 `osm-qt` 分支时把标签指到默认分支 `dev`。同一标签重跑会复用已有 Release 并覆盖同名 assets；`draft: true` 显式设置，即使该标签原本已发布也会被更新回 draft。手工运行每次都会发/覆盖这个 `v<version>` Release，因此用同一版本号重复跑会持续覆盖；要保留历史版本需换 `version` 输入或改用新标签。
 
