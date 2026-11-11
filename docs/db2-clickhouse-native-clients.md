@@ -45,9 +45,11 @@ written to the driver definition. DBeaver connections are temporary (`save=false
 ## Boundaries and regression checks
 
 - Both proxy frontends currently use plaintext. Use a trusted network or a
-  separately secured tunnel. Do not configure frontend TLS as if it were backend TLS.
-- This change does not add protocol-level masking, HTTP bridging or new authentication
-  mechanisms to Magnus. Existing experimental DRDA/Native limits still apply.
+  separately secured tunnel. Do not configure frontend TLS as if it were
+  backend TLS.
+- This change does not add protocol-level masking, HTTP bridging or new
+  authentication mechanisms to Magnus. Existing experimental DRDA/Native limits
+  still apply.
 - Enterprise licensing/vendor rules remain aligned with Oracle/Dameng.
 - Do not alter the driver mapping, authentication or user preferences of MySQL,
   MariaDB, PostgreSQL, Oracle, Dameng, SQL Server, Redis or MongoDB.
@@ -58,6 +60,7 @@ written to the driver definition. DBeaver connections are temporary (`save=false
   This is **not** a claim of Windows/Linux GUI validation.
 
 References:
+
 - [DBeaver command-line parameters](https://dbeaver.com/docs/dbeaver/Command-Line/)
 - [DBeaver managed driver XML](https://dbeaver.com/docs/dbeaver/Admin-Manage-Drivers/)
 - [Native JDBC driver](https://github.com/housepower/ClickHouse-Native-JDBC)
