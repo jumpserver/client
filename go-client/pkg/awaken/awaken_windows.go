@@ -302,6 +302,9 @@ func handleDB(r *Rouse, cfg *config.AppConfig) (*exec.Cmd, error) {
 	if appItem == nil {
 		return nil, nil
 	}
+	if appItem.Name == "dbeaver" && (r.Protocol == "db2" || r.Protocol == "clickhouse") {
+		return nativeDatabaseCommand(r, appItem)
+	}
 	appPath := appItem.Path
 	if !appItem.IsInternal {
 		if err := validateAppPath(appItem.Path); err != nil {

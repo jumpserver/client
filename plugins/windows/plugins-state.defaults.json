@@ -1,6 +1,8 @@
 {
   "version": 1,
   "selections": {
+    "databases:db2": "windows.dbeaver",
+    "databases:clickhouse": "windows.dbeaver",
     "terminal:ssh": "windows.putty",
     "terminal:telnet": "windows.putty",
     "remotedesktop:rdp": "windows.mstsc"

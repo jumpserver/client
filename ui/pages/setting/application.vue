@@ -8,7 +8,7 @@ definePageMeta({
 
 const { t } = useI18n();
 const localePath = useLocalePath();
-const HIDDEN_DATABASE_PROTOCOLS = new Set(["mongodb", "oracle"]);
+const HIDDEN_DATABASE_PROTOCOLS = new Set(["mongodb", "oracle", "db2", "clickhouse"]);
 const appName = getConfiguredAppName();
 
 const appMenu = computed<NavigationMenuItem[]>(() => {
@@ -47,6 +47,16 @@ const appMenu = computed<NavigationMenuItem[]>(() => {
       label: "SQL Server",
       to: localePath({ name: "setting-application-sqlserver" }),
       protocol: "sqlserver"
+    },
+    {
+      label: "DB2",
+      to: localePath({ name: "setting-application-db2" }),
+      protocol: "db2"
+    },
+    {
+      label: "ClickHouse",
+      to: localePath({ name: "setting-application-clickhouse" }),
+      protocol: "clickhouse"
     }
   ].filter((item) => isDefaultAppName(appName) || !HIDDEN_DATABASE_PROTOCOLS.has(item.protocol));
 

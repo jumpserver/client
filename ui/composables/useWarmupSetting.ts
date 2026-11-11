@@ -14,7 +14,9 @@ export async function useWarmupSetting() {
       import("@/pages/setting/application/redis.vue"),
       import("@/pages/setting/application/pg.vue"),
       import("@/pages/setting/application/oracle.vue"),
-      import("@/pages/setting/application/sqlserver.vue")
+      import("@/pages/setting/application/sqlserver.vue"),
+      import("@/pages/setting/application/db2.vue"),
+      import("@/pages/setting/application/clickhouse.vue")
     ]);
   } catch {}
 }

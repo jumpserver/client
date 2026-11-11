@@ -1,6 +1,8 @@
 {
   "version": 1,
   "selections": {
+    "databases:db2": "linux.dbeaver",
+    "databases:clickhouse": "linux.dbeaver",
     "terminal:ssh": "linux.terminal",
     "terminal:telnet": "linux.terminal",
     "remotedesktop:vnc": "linux.tigervnc",

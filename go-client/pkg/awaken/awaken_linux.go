@@ -291,6 +291,9 @@ func awakenDBCommand(r *Rouse, cfg *config.AppConfig) (*exec.Cmd, error) {
 	if appItem == nil {
 		return nil, nil
 	}
+	if appItem.Name == "dbeaver" && (r.Protocol == "db2" || r.Protocol == "clickhouse") {
+		return nativeDatabaseCommand(r, appItem)
+	}
 	var cmd *exec.Cmd
 	connectMap := map[string]string{
 		"name":     r.getName(),

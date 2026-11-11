@@ -2,7 +2,7 @@
   "id": "linux.dbeaver",
   "name": "dbeaver",
   "display_name": "DBeaver Community",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "min_client_version": "4.0.0",
   "author": "JumpServer",
   "homepage": "https://github.com/jumpserver/clients",
@@ -13,7 +13,9 @@
     "mysql",
     "oracle",
     "postgresql",
-    "sqlserver"
+    "sqlserver",
+    "db2",
+    "clickhouse"
   ],
   "builtin": true,
   "comment": {

@@ -1,6 +1,8 @@
 {
   "version": 1,
   "selections": {
+    "databases:db2": "macos.dbeaver",
+    "databases:clickhouse": "macos.dbeaver",
     "terminal:ssh": "macos.terminal",
     "terminal:telnet": "macos.terminal",
     "remotedesktop:rdp": "macos.mstsc",

@@ -288,7 +288,7 @@ func (r *Rouse) Run() {
 			r.HandleVNC(&appConfig)
 		case "ssh", "sftp", "telnet":
 			r.HandleSSH(&appConfig)
-		case "mysql", "mariadb", "postgresql", "redis", "oracle", "sqlserver", "mongodb":
+		case "mysql", "mariadb", "postgresql", "redis", "oracle", "sqlserver", "mongodb", "db2", "clickhouse":
 			r.HandleDB(&appConfig)
 		default:
 			reportErrorf("Unsupported protocol: %s", protocol)
