@@ -2,6 +2,9 @@
 iterm = "iterm"
 devlop = "devlop"
 reqest = "reqest"
+# ISO BMFF track-box FourCC and the flate2 compression crate, not English prose.
+trak = "trak"
+flate = "flate"
 
 [files]
 extend-exclude = [
