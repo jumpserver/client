@@ -31,12 +31,12 @@ QRect ClientTheme::dialogAvailableGeometry(const QWidget *dialog, bool initialPl
 #endif
 }
 
-void ClientTheme::positionDialog(QWidget *dialog, bool initialPlacement) {
+void ClientTheme::positionDialog(QWidget *dialog, bool initialPlacement, int verticalOffset) {
   const QWidget *owner = dialog->parentWidget() ? dialog->parentWidget()->window() : nullptr;
   const QRect available = dialogAvailableGeometry(dialog, initialPlacement);
   QRect frame = dialog->frameGeometry();
   if (initialPlacement)
-    frame.moveCenter((owner ? owner->frameGeometry() : available).center() - QPoint(0, 24));
+    frame.moveCenter((owner ? owner->frameGeometry() : available).center() - QPoint(0, verticalOffset));
   const int left = qBound(available.left() + 16, frame.left(),
                          qMax(available.left() + 16, available.right() - frame.width() - 15));
   const int top = qBound(available.top() + 16, frame.top(),
@@ -160,6 +160,7 @@ public:
       {"network", "<rect x='3' y='3' width='12' height='15' rx='2'/><rect x='11' y='8' width='10' height='13' rx='2'/>"},
       {"browser", "<rect x='3' y='4' width='18' height='16' rx='3'/><path d='M3 9h18M7 6.5h.01M10 6.5h.01'/>"},
       {"box", "<path d='m12 3 9 5v9l-9 5-9-5V8Zm0 9 9-4M3 8l9 4v10M7.5 5.5l9 5'/>"},
+      {"ellipsis-circle", "<circle cx='12' cy='12' r='9'/><path d='M7 12h.01M12 12h.01M17 12h.01'/>"},
       {"star", "<path d='m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z'/>"},
       {"search", "<circle cx='10.5' cy='10.5' r='6.5'/><path d='m16 16 4 4'/>"},
       {"sidebar", "<rect x='3' y='4' width='18' height='16' rx='3'/><path d='M9 4v16M6 8h.01M6 11h.01'/>"},
@@ -358,6 +359,7 @@ QLabel#welcomeTitle { font-size: 22px; font-weight: 600; }
 QFrame#sidebar, QFrame#settingsSidebar { background: @sidebar@; border: none; border-right: 1px solid @border@; }
 QFrame#topbar { background: @panel@; border: none; border-bottom: 1px solid @border@; }
 QFrame[surface=true] { background: @panel@; border: 1px solid @border@; border-radius: 12px; }
+QFrame#dialogHeader { border: none; border-bottom: 1px solid @border@; background: transparent; }
 QFrame#dialogFooter { border: none; border-top: 1px solid @border@; background: @background@; }
 QFrame#profilePanel { border: none; border-top: 1px solid @border@; background: transparent; }
 QLabel#avatar { background: @selected@; border-radius: 16px; }

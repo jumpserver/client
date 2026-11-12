@@ -14,11 +14,11 @@ on:
       sign_macos:
         description: 'Request macOS signing/notarization (tags request it; missing credentials skip)'
         type: boolean
-        default: false
+        default: true
       sign_windows:
         description: 'Request Windows Authenticode signing (missing PFX skips signing)'
         type: boolean
-        default: false
+        default: true
       windows_x86:
         description: 'Also build Windows 32-bit installers (Windows 10+)'
         type: boolean
@@ -413,7 +413,7 @@ jobs:
               }
             done
           done
-          test -f "release-assets/OSMClient-${CLIENT_VERSION}-linux-arm64-kylin.deb" || {
+          test -f "release-assets/OSMClient-${CLIENT_VERSION}-kylin-arm64.deb" || {
             echo "Missing Kylin V10 SP1 arm64 DEB installer" >&2
             exit 1
           }

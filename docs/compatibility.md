@@ -42,7 +42,7 @@ LoongArch 启动器通过独立 `scripts/go-loong64.mod/.sum` 将 `x/sys` 提升
 - 上述 SSH/RDP 问题已在无网络的 Debian arm64 一次性容器中复现：DDE/组合标识返回 nil，缺少 GNOME 终端时 UKUI 启动失败，RDP 忽略可执行的配置路径。这里是缺陷复现记录，不代表系统兼容验收；终端选择已改为按桌面标识和实际安装情况回退。
 - `go-client/config.json` 的 Linux TigerVNC 下载链接固定为 x86_64，不能用于 ARM/龙芯；Linux `filetransfer` 默认目录为空，SFTP 不能据此宣称开箱可用。
 - CMake 默认要求 Qt >= 5.15；通过 `CLIENT_QT5_MIN_VERSION=5.12` 可在 Qt 5.12 基线上构建，源码已移除对 `QByteArray::fromBase64Encoding`、`QWidget::screen()` 等 5.15 专用 API 的依赖。目标系统 Qt 低于该基线时仍不能安装使用动态链接包。RPM 依赖名称按现有构建发行版固定，必须在各目标软件源验证；不能简单将 DEB/RPM 后缀视为发行版兼容。
-- `.github/workflows/build.yml` 有独立的 `linux-kylin` 作业（`ubuntu:20.04` 容器 + Qt 5.12.8），产出 `OSMClient-<ver>-linux-arm64-kylin.deb`，覆盖银河麒麟 V10 SP1。UOS、龙芯等其它发行版仍未单独产包。打包脚本检查 ELF machine/端序，但没有检测 LoongArch 新旧世界 ABI 或自动限定 GLIBC/GLIBCXX 上限。
+- `.github/workflows/build.yml` 有独立的 `linux-kylin` 作业（`ubuntu:20.04` 容器 + Qt 5.12.8），产出 `OSMClient-<ver>-kylin-arm64.deb`，覆盖银河麒麟 V10 SP1。UOS、龙芯等其它发行版仍未单独产包。打包脚本检查 ELF machine/端序，但没有检测 LoongArch 新旧世界 ABI 或自动限定 GLIBC/GLIBCXX 上限。
 - 直接 CMake 原生构建时 `mips64` 未自动映射到 `mips64le`；`package-linux.py` 已处理小端 `mips64` 并显式传入架构，直接构建需指定 `CLIENT_GOARCH=mips64le`。
 
 龙芯关键边界：上游 Go 的 LoongArch 实现采用 LP64D，初始支持要求 Linux 5.19；官方明确指出历史商业发行版的旧 syscall ABI 即使静态链接也不兼容，应使用发行版提供的 Go。不能仅凭 `uname -m=loongarch64` 或静态 ELF 判定可运行，厂商回移植内核还需具体确认。参见 [Go 官方 LoongArch 说明](https://go.dev/doc/go1.19#loong64) 和 [AOSC 新旧世界兼容层说明](https://aosc.io/liblol)。

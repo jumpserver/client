@@ -100,8 +100,8 @@ ConnectionDialog::ConnectionDialog(
   setWindowFlag(Qt::WindowContextHelpButtonHint, false);
   setWindowTitle(text("连接设置", "Connection settings"));
   setObjectName("connectionDialog");
-  setMinimumSize(460, 320);
-  resize(480, 320);
+  setMinimumSize(520, 320);
+  resize(560, 320);
   m_saved = saved(scope, asset["id"].toString());
   auto *layout = new QVBoxLayout(this);
   layout->setContentsMargins(0, 0, 0, 0);
@@ -119,68 +119,35 @@ ConnectionDialog::ConnectionDialog(
   scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   scroll->setWidget(content);
   layout->addWidget(scroll, 1);
-  auto *header = new QWidget(this);
+  auto *header = new QFrame(this);
+  header->setObjectName("dialogHeader");
   auto *headerLayout = new QVBoxLayout(header);
-  headerLayout->setContentsMargins(24, 22, 24, 0);
-  headerLayout->setSpacing(7);
-  auto *title = new QLabel(text("连接设置", "Connection settings"), header);
+  headerLayout->setContentsMargins(24, 22, 24, 20);
+  headerLayout->setSpacing(8);
+  auto *title = new QLabel(text("连接", "Connect") + " - " + asset["name"].toString(), header);
+  title->setTextFormat(Qt::PlainText);
+  title->setWordWrap(true);
   title->setProperty("role", "dialogTitle");
   headerLayout->addWidget(title);
   auto *description =
-      new QLabel(text("选择连接方式和授权账号。",
-                      "Choose a connection method and an authorized account."),
+      new QLabel(text("保存后，下次连接将默认使用这些设置，右击重新设置",
+                      "Once saved, these settings are used by default for future connections. Right-click to change them."),
                  header);
   description->setProperty("muted", true);
   description->setWordWrap(true);
   headerLayout->addWidget(description);
-  headerLayout->addSpacing(12);
-  auto *summary = new QFrame(header);
-  summary->setObjectName("connectionAsset");
-  summary->setProperty("surface", true);
-  auto *summaryLayout = new QHBoxLayout(summary);
-  summaryLayout->setContentsMargins(14, 12, 14, 12);
-  summaryLayout->setSpacing(12);
-  auto *assetIcon = new QPushButton(summary);
-  QString assetType =
-      asset.value("type").isObject()
-          ? asset.value("type").toObject().value("value").toString()
-          : asset.value("type").toString();
-  const QString category =
-      asset.value("category").toObject().value("value").toString();
-  const QString iconName = assetType.startsWith("windows") ? "desktop"
-                           : category == "database"        ? "database"
-                           : assetType == "website"        ? "globe"
-                                                           : "terminal";
-  assetIcon->setIcon(ClientTheme::icon(iconName));
-  assetIcon->setIconSize(QSize(24, 24));
-  assetIcon->setFixedSize(36, 36);
-  assetIcon->setProperty("quiet", true);
-  assetIcon->setProperty("iconOnly", true);
-  assetIcon->setFocusPolicy(Qt::NoFocus);
-  assetIcon->setAttribute(Qt::WA_TransparentForMouseEvents);
-  summaryLayout->addWidget(assetIcon);
-  auto *identity = new QVBoxLayout;
-  identity->setSpacing(3);
-  auto *name = new QLabel(asset["name"].toString(), summary);
-  name->setTextFormat(Qt::PlainText);
-  name->setWordWrap(true);
-  name->setProperty("role", "sectionTitle");
-  identity->addWidget(name);
-  auto *address = new QLabel(asset["address"].toString(), summary);
-  address->setTextFormat(Qt::PlainText);
-  address->setWordWrap(true);
-  address->setVisible(!address->text().isEmpty() && address->text() != name->text());
-  address->setProperty("muted", true);
-  address->setTextInteractionFlags(Qt::TextSelectableByMouse);
-  identity->addWidget(address);
-  summaryLayout->addLayout(identity, 1);
-  headerLayout->addWidget(summary);
   contentLayout->addWidget(header);
   auto *body = new QWidget(this);
   body->setObjectName("connectionForm");
   auto *form = new QVBoxLayout(body);
   form->setContentsMargins(24, 20, 24, 22);
   form->setSpacing(16);
+  QString assetType =
+      asset.value("type").isObject()
+          ? asset.value("type").toObject().value("value").toString()
+          : asset.value("type").toString();
+  const QString category =
+      asset.value("category").toObject().value("value").toString();
   auto addField = [body, form](QLabel *label, QWidget *control) {
     auto *field = new QWidget(body);
     auto *fieldLayout = new QVBoxLayout(field);
@@ -502,7 +469,9 @@ void ConnectionDialog::fitHeightToContents() {
   // Center using the final decorated size, not the constructor's 320px height.
   // Later field changes keep the top-left stable unless the frame would leave
   // the available screen; this also respects a position chosen by the user.
-  if (isVisible()) ClientTheme::positionDialog(this, m_initialPlacement);
+  // Sit higher than the owner's center so the expanded manual-account form
+  // (which grows downward) still stays comfortably on screen.
+  if (isVisible()) ClientTheme::positionDialog(this, m_initialPlacement, 70);
 }
 void ConnectionDialog::showEvent(QShowEvent *event) {
   QDialog::showEvent(event);

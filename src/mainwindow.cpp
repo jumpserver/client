@@ -386,7 +386,7 @@ MainWindow::MainWindow(AppService *service, ConfigStore *config,
   setWindowTitle("OSMClient");
   setWindowIcon(ClientTheme::applicationIcon());
   setMinimumSize(800, 480);
-  resize(1180, 720);
+  resize(1000, 600);
   ClientTheme::apply();
   buildUi();
   connect(service, &AppService::loginStateChanged, this,
@@ -700,7 +700,7 @@ void MainWindow::buildUi() {
   m_categories->setFrameShape(QFrame::NoFrame);
   m_categories->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   m_categories->addItems(categoryLabels());
-  const QStringList categoryIcons{"terminal", "windows", "database", "network", "browser", "box", "star"};
+  const QStringList categoryIcons{"terminal", "windows", "database", "network", "browser", "ellipsis-circle", "star"};
   for (int row = 0; row < m_categories->count(); ++row)
     m_categories->item(row)->setIcon(ClientTheme::icon(categoryIcons[row]));
   m_categories->setIconSize(QSize(20, 20));
@@ -714,14 +714,13 @@ void MainWindow::buildUi() {
   profileRow->setContentsMargins(2, 12, 2, 2);
   profileRow->setSpacing(9);
   auto *avatar = iconButton("user", "avatar");
+  avatar->setIcon(QIcon(QStringLiteral(":/images/user_avatar.png")));
+  avatar->setIconSize(QSize(32, 32));
   profileRow->addWidget(avatar);
   connect(avatar, &QPushButton::clicked, this, [this, avatar] {
+    if (!m_service->authenticated()) return;
     QMenu menu(this);
-    menu.addAction(text("切换站点", "Switch site"), m_switcher, &QPushButton::click);
-    if (m_service->authenticated()) {
-      menu.addSeparator();
-      menu.addAction(text("退出登录", "Sign out"), m_service, &AppService::logout);
-    }
+    menu.addAction(text("退出登录", "Sign out"), m_service, &AppService::logout);
     menu.exec(avatar->mapToGlobal(QPoint(0, 0)) - QPoint(0, menu.sizeHint().height()));
   });
   m_profile = new QLabel;
@@ -752,7 +751,7 @@ void MainWindow::buildUi() {
   root->addWidget(workspace, 1);
   auto *topbar = new QFrame;
   topbar->setObjectName("topbar");
-  topbar->setFixedHeight(56);
+  topbar->setFixedHeight(48);
   auto *top = new QHBoxLayout(topbar);
   top->setContentsMargins(22, 0, 16, 0);
   top->setSpacing(12);
@@ -1603,6 +1602,9 @@ void MainWindow::updateSessionUi() {
                                   "\n" + m_service->site()
                             : text("尚未登录", "Not signed in"));
   m_profile->setToolTip(m_profile->text());
+  auto *avatar = findChild<QPushButton *>("avatar");
+  avatar->setToolTip(active ? m_profile->text() : text("账户与站点", "Account and sites"));
+  avatar->setAccessibleName(avatar->toolTip());
 }
 void MainWindow::updateLoginState() {
   const bool pending = m_service->loginPending();

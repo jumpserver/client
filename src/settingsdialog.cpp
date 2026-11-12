@@ -162,7 +162,7 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
   auto addPage = [this, tabs, navigation](QWidget *content, const char *titleZh,
                                     const char *titleEn, const char *descriptionZh,
                                     const char *descriptionEn,
-                                    bool stretch = false) {
+                                    bool stretch = false, bool scrollable = true) {
     const QString title = text(titleZh, titleEn);
     const QString description = text(descriptionZh, descriptionEn);
     auto *page = new QWidget;
@@ -182,12 +182,18 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
     pageLayout->addWidget(content, stretch ? 1 : 0);
     if (!stretch)
       pageLayout->addStretch();
-    auto *scroll = new QScrollArea(tabs);
-    scroll->setObjectName("settingsScroll");
-    scroll->setFrameShape(QFrame::NoFrame);
-    scroll->setWidgetResizable(true);
-    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    scroll->setWidget(page);
+    // Pages with their own scroll areas must not be nested in another one, or
+    // the outer area absorbs the overflow and the inner bars never appear.
+    QWidget *scroll = page;
+    if (scrollable) {
+      auto *area = new QScrollArea(tabs);
+      area->setObjectName("settingsScroll");
+      area->setFrameShape(QFrame::NoFrame);
+      area->setWidgetResizable(true);
+      area->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+      area->setWidget(page);
+      scroll = area;
+    }
     tabs->addTab(scroll, title);
     auto *item = new QListWidgetItem(title, navigation);
     m_translations.append([tabs, scroll, item, titleLabel, descriptionLabel,
@@ -443,7 +449,7 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
   addPage(apps, "本地应用", "Applications",
           "先选择连接协议，再为它指定默认客户端或已安装的应用。",
           "Pick a connection protocol, then choose its default client or point to an installed application.",
-          true);
+          true, false);
   const QJsonObject platformApplications = m_config->applications();
   auto *protocolColumn = new QWidget(apps);
   protocolColumn->setObjectName("settingsProtocolColumn");
@@ -507,7 +513,6 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
   protocolScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   protocolScroll->setWidget(protocolColumn);
   protocolScroll->setFixedWidth(190);
-  protocolScroll->setMinimumHeight(320);
   al->addWidget(protocolScroll);
   auto *cardHost = new QWidget;
   cardHost->setObjectName("applicationCardHost");
@@ -528,7 +533,6 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
   cardScroll->setWidgetResizable(true);
   cardScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   cardScroll->setWidget(cardHost);
-  cardScroll->setMinimumHeight(320);
   al->addWidget(cardScroll, 1);
   if (firstProtocol)
     firstProtocol->setChecked(true);

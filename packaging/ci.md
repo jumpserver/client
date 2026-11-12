@@ -17,7 +17,7 @@
 银河麒麟 V10 SP1 只提供 Qt 5.12.12，Debian 11 的 Qt 5.15.2 产物会因
 `libqt5core5a (>= 5.15.1)` 等依赖和 `QByteArray::fromBase64Encoding`、`QWidget::screen()`
 等 5.15 符号无法安装或启动。`linux-kylin` job 因此单独使用 Qt 5.12 基线构建，
-产出 `OSMClient-<ver>-linux-arm64-kylin.deb`。包名与安装路径统一为 `client`；
+产出 `OSMClient-<ver>-kylin-arm64.deb`。包名与安装路径统一为 `client`；
 下载文件名通过 `CLIENT_PACKAGE_VARIANT` 区分，避免与 Debian 包混淆。
 
 Linux 构建分别在 Ubuntu 24.04 x86_64 和 ARM64 runner 的发行版容器内完成，镜像固定到各架构的 digest。RPM 使用原生 `rpmbuild`，不从 DEB 转换；Qt、libsecret 等由目标发行版包管理器提供。Debian 11 security 仓库迁移到 archive 后只调整仓库 URL 和过期元数据检查，保留包签名校验。Rocky 使用官方 HTTPS baseurl，避免地理镜像同步窗口导致的 404。
