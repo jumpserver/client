@@ -48,12 +48,6 @@ struct ProtocolSection {
   QString icon;
   QList<QPair<QString, QString>> protocols;
 };
-// Oracle is hidden from local application settings on purpose; the helper keeps
-// its Oracle routing, so existing launches are unaffected.
-const QStringList &hiddenProtocols() {
-  static const QStringList values{QStringLiteral("oracle")};
-  return values;
-}
 const QList<ProtocolSection> &protocolSections() {
   static const QList<ProtocolSection> sections{
       {QStringLiteral("terminal"), QStringLiteral("命令行终端"),
@@ -464,8 +458,6 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
         platformApplications.value(section.category).toArray();
     QList<QPair<QString, QString>> protocols;
     for (const auto &entry : section.protocols) {
-      if (hiddenProtocols().contains(entry.first))
-        continue;
       bool configured = false;
       for (const auto &value : items)
         configured |= supportsProtocol(value.toObject(), entry.first);
@@ -822,11 +814,8 @@ QWidget *SettingsDialog::applicationCard(const QJsonObject &item,
   auto *badges = new QHBoxLayout;
   badges->setSpacing(5);
   QStringList supported;
-  for (const QJsonValue &value : item.value("protocol").toArray()) {
-    const QString key = value.toString();
-    if (!hiddenProtocols().contains(key))
-      supported << key.toUpper();
-  }
+  for (const QJsonValue &value : item.value("protocol").toArray())
+    supported << value.toString().toUpper();
   // Badge widths are measured with the font they render with, so the pills never
   // clip. Long protocol lists collapse into a "+N" pill that keeps the full list
   // in its tooltip, which also keeps narrow windows readable.
