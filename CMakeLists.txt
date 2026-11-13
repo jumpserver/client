@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-set(CLIENT_VERSION "4.1.2" CACHE STRING "Numeric installer version (major.minor.patch)")
+set(CLIENT_VERSION "4.1.4" CACHE STRING "Numeric installer version (major.minor.patch)")
 if(NOT CLIENT_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
   message(FATAL_ERROR "CLIENT_VERSION must be numeric major.minor.patch")
 endif()

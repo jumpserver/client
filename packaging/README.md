@@ -11,7 +11,7 @@
 python3 scripts/package-macos.py --build build-qt5 \
   --macdeployqt /path/to/Qt/bin/macdeployqt --output dist/OSMClient.app --deployment-target 11.0
 python3 scripts/package-dmg.py --app dist/OSMClient.app \
-  --output dist/OSMClient-4.1.2-macos-arm64.dmg --deployment-target 11.0
+  --output dist/OSMClient_4.1.4_aarch64.dmg --deployment-target 11.0
 
 # Windows：在匹配 Qt/编译器的开发命令行中配置 CMake 后，构建并生成两种安装包。
 python scripts/package-windows.py --build build-win --arch amd64 \
@@ -30,7 +30,7 @@ Linux 检查 ELF 架构及可执行位、校验包内文件与 Qt/libsecret 依�
 
 统一版本使用 CMake 的 `-DCLIENT_VERSION=X.Y.Z`；Linux 脚本用 `--cmake-arg CLIENT_VERSION=X.Y.Z` 传入。各目标应独立使用构建目录。
 
-应用显示名、快捷方式和 macOS 安装盘卷名统一为 `OSMClient`；安装包文件名使用 `OSMClient-<version>-<platform>-<arch>`。为保留升级、配置和协议关联，Linux 和 macOS 内部可执行文件、Linux 包名、桌面文件名、macOS bundle ID 不变；Windows 可执行文件名为 `client.exe`；Windows 默认安装到 `Program Files/OSMClient`，旧的用户级安装需先卸载。NSIS 升级调用旧卸载器清理其旧快捷方式；MSI 在安装新版本前卸载同一 UpgradeCode 的旧版本。
+应用显示名、快捷方式和 macOS 安装盘卷名统一为 `OSMClient`；macOS 与 Windows 安装包文件名使用 Tauri 风格：macOS 为 `OSMClient_<version>_<aarch64|x64>.dmg`，Windows 为 `OSMClient_<version>_<x64|x86>-setup.exe` 与 `OSMClient_<version>_<x64|x86>.msi`；Linux 仍为 `OSMClient-<version>-linux-<arch>`。为保留升级、配置和协议关联，Linux 和 macOS 内部可执行文件、Linux 包名、桌面文件名、macOS bundle ID 不变；Windows 可执行文件名为 `client.exe`；Windows 默认安装到 `Program Files/OSMClient`，旧的用户级安装需先卸载。NSIS 升级调用旧卸载器清理其旧快捷方式；MSI 在安装新版本前卸载同一 UpgradeCode 的旧版本。
 
 ## CI 与签名
 

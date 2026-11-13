@@ -293,12 +293,14 @@ def main():
         output.mkdir(parents=True, exist_ok=True)
         artifacts = work / 'artifacts'
         artifacts.mkdir()
-        label = f'OSMClient-{version}-windows-{args.arch}'
+        win_arch = 'x64' if args.arch == 'amd64' else 'x86'
+        base = f'OSMClient_{version}_{win_arch}'
+        names = {'exe': f'{base}-setup.exe', 'msi': f'{base}.msi'}
         formats = ('exe', 'msi') if args.format == 'both' else (args.format,)
         for extension in formats:
-            if any((output / f'{label}.{extension}{suffix}').exists()
+            if any((output / f'{names[extension]}{suffix}').exists()
                    for suffix in ('', '.sha256', '.manifest.json')):
-                raise RuntimeError(f'Destination exists: {output / (label + "." + extension)}')
+                raise RuntimeError(f'Destination exists: {output / names[extension]}')
         if not args.skip_build:
             run([tool(args.cmake), '--build', build, '--config', args.config, '--target', 'client'], 'Building Windows GUI and launchers')
         executable = build / args.config / 'client.exe'
@@ -357,7 +359,7 @@ def main():
             write_nsis_manifest(stage, manifest)
             command = [tool(args.makensis), '/V2', '/DVERSION=' + version,
                        '/DARCH=' + args.arch, '/DMANIFEST=' + str(manifest),
-                       '/DOUTPUT=' + str(artifacts / f'{label}.exe')]
+                       '/DOUTPUT=' + str(artifacts / names['exe'])]
             if signer.enabled:
                 # Only paths/tool options enter the generated command, never credentials.
                 sign_command = subprocess.list2cmdline([sys.executable, str(Path(__file__).resolve()),
@@ -376,14 +378,14 @@ def main():
                  '-dProtocolGuard=' + str(custom_action), '-dIcon=' + str(ROOT / 'resources' / 'icon.ico'),
                  '-dProgramFilesDirectory=' + ('ProgramFiles64Folder' if args.arch == 'amd64' else 'ProgramFilesFolder'),
                  '-out', str(work) + os.sep, ROOT / 'packaging' / 'windows.wxs', payload], 'Compiling WiX 3 MSI sources')
-            run([tool(args.light), '-nologo', '-out', artifacts / f'{label}.msi',
+            run([tool(args.light), '-nologo', '-out', artifacts / names['msi'],
                  work / 'windows.wixobj', work / 'payload.wixobj'], 'Linking and validating MSI installer')
         for extension in formats:
-            artifact = artifacts / f'{label}.{extension}'
+            artifact = artifacts / names[extension]
             signer.sign(artifact)
         # Publish locally only after every requested package and signature passed.
         for extension in formats:
-            artifact = artifacts / f'{label}.{extension}'
+            artifact = artifacts / names[extension]
             digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
             target = output / artifact.name
             with artifact.open('rb') as source, target.open('xb') as destination:

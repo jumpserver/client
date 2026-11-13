@@ -18,7 +18,7 @@ python3 scripts/package-macos.py --build build-arm64 \
   --macdeployqt /tmp/osm-qt-arm64/bin/macdeployqt \
   --output dist/arm64/OSMClient.app --deployment-target 11.0
 python3 scripts/package-dmg.py --app dist/arm64/OSMClient.app \
-  --output dist/OSMClient-4.1.2-macos-arm64.dmg --deployment-target 11.0
+  --output dist/OSMClient_4.1.4_aarch64.dmg --deployment-target 11.0
 ```
 
 ## Apple Silicon 交叉构建 Intel
@@ -40,7 +40,7 @@ python3 scripts/package-macos.py --build build-x86_64 \
   --plugins-dir /tmp/osm-qt-x86_64/plugins --libpath /tmp/osm-qt-x86_64/lib \
   --output dist/x86_64/OSMClient.app --deployment-target 10.15 --skip-smoke
 python3 scripts/package-dmg.py --app dist/x86_64/OSMClient.app \
-  --output dist/OSMClient-4.1.2-macos-x86_64.dmg \
+  --output dist/OSMClient_4.1.4_x64.dmg \
   --deployment-target 10.15 --skip-smoke
 ```
 
