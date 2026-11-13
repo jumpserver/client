@@ -7,7 +7,7 @@
 ```powershell
 cmake -S . -B build-windows -A x64 `
   -DCLIENT_QT_MAJOR=5 -DCMAKE_PREFIX_PATH=C:/Qt/5.15.2/msvc2019_64 `
-  -DCLIENT_GOOS=windows -DCLIENT_GOARCH=amd64 -DCLIENT_VERSION=4.1.4
+  -DCLIENT_GOOS=windows -DCLIENT_GOARCH=amd64 -DCLIENT_VERSION=4.1.2
 
 python scripts/package-windows.py --build build-windows `
   --windeployqt C:/Qt/5.15.2/msvc2019_64/bin/windeployqt.exe `
@@ -19,8 +19,8 @@ python scripts/package-windows.py --build build-windows `
 
 脚本依次构建 GUI/Go helper、创建临时安装树、运行匹配的 `windeployqt --release --compiler-runtime`、部署运行库、检查 PE 架构及必需文件，并从清理 Qt 开发环境变量的环境运行 `--smoke-test`。当 Qt 5 的 `bin` 目录既没有 `libGLESv2.dll`/`libEGL.dll`，也没有合并的 `QtANGLE.dll` 时（CI 的 `-no-opengl` 源码构建即如此），额外传入 `--no-angle --no-opengl-sw`，避免部署工具寻找不存在的 ANGLE/软件光栅库；自带 ANGLE 的 Qt 5 及 Qt 6 保留部署工具的默认依赖判断。最后生成：
 
-- `OSMClient_<version>_<x64|x86>-setup.exe`：NSIS 全局安装器。
-- `OSMClient_<version>_<x64|x86>.msi`：Windows Installer 全局安装包，支持版本升级；可用 `msiexec /i <file>.msi /qn` 安装。
+- `OSMClient-<version>-windows-<arch>.exe`：NSIS 全局安装器。
+- `OSMClient-<version>-windows-<arch>.msi`：Windows Installer 全局安装包，支持版本升级；可用 `msiexec /i <file>.msi /qn` 安装。
 - 各安装包的 `.sha256` 和 `.manifest.json` 文件；manifest 记录实际 `signed` 状态。
 
 输出目录同名文件已存在时失败；构建/部署/签名中途失败不会把临时安装器复制到输出目录。应用签名不会修改原始构建目录。`--makensis`、`--candle`、`--light`、`--compiler` 可以指定工具完整路径。

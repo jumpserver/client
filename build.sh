@@ -98,7 +98,6 @@ case "$platform" in
     [[ "$format" == dmg ]] || fail 'macOS format must be dmg'
     [[ -n "$qt_prefix" ]] || fail 'macOS requires --qt-prefix built for the target OS baseline'
     qt_arch=$arch; [[ "$arch" != amd64 ]] || qt_arch=x86_64
-    dmg_arch=x64; [[ "$arch" != arm64 ]] || dmg_arch=aarch64
     [[ -n "$deployment" ]] || { if [[ "$arch" == amd64 ]]; then deployment=10.15; else deployment=11.0; fi; }
     ;;
   windows)
@@ -179,7 +178,7 @@ else
   if $cross; then cmd+=(--plugins-dir "$qt_prefix/plugins" --libpath "$qt_prefix/lib" --skip-smoke); fi
   $sign && cmd+=(--sign)
   run "${cmd[@]}"
-  cmd=("$python" "$ROOT/scripts/package-dmg.py" --app "$output/OSMClient.app" --output "$output/OSMClient_${version}_${dmg_arch}.dmg" --deployment-target "$deployment")
+  cmd=("$python" "$ROOT/scripts/package-dmg.py" --app "$output/OSMClient.app" --output "$output/OSMClient-$version-macos-$qt_arch.dmg" --deployment-target "$deployment")
   $cross && cmd+=(--skip-smoke)
   $sign && cmd+=(--sign)
   $notarize && cmd+=(--notarize)

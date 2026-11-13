@@ -150,7 +150,7 @@ jobs:
             echo 'Developer ID signing unavailable or not requested: creating unsigned/ad-hoc DMG.'
           fi
           python scripts/package-macos.py --build build --macdeployqt "$QT_PREFIX/bin/macdeployqt" --output dist/OSMClient.app --deployment-target "$MACOSX_DEPLOYMENT_TARGET" "${sign_args[@]}"
-          python scripts/package-dmg.py --app dist/OSMClient.app --output "dist/OSMClient_${CLIENT_VERSION}_${{ matrix.arch == 'arm64' && 'aarch64' || 'x64' }}.dmg" --deployment-target "$MACOSX_DEPLOYMENT_TARGET" "${notary_args[@]}"
+          python scripts/package-dmg.py --app dist/OSMClient.app --output "dist/OSMClient-${CLIENT_VERSION}-macos-${{ matrix.arch }}.dmg" --deployment-target "$MACOSX_DEPLOYMENT_TARGET" "${notary_args[@]}"
       - name: Remove temporary signing keychain
         if: always() && needs.metadata.outputs.sign_macos == 'true'
         run: python scripts/setup-apple-cert.py cleanup
