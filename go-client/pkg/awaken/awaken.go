@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -94,6 +95,16 @@ func reportErrorf(format string, args ...interface{}) {
 	reportError(msg)
 }
 
+func runApplication(cmd *exec.Cmd, name string) {
+	if err := cmd.Start(); err != nil {
+		reportErrorf("Failed to start %s application: %v", name, err)
+		return
+	}
+	if err := cmd.Wait(); err != nil {
+		global.LOG.Error(fmt.Sprintf("%s application exited: %v", name, err))
+	}
+}
+
 func removeCurRdpVncFile() {
 	re := regexp.MustCompile(`(?i)\.(rdp|vncpaxx)$`)
 	dir, _ := os.UserConfigDir()
@@ -132,9 +143,7 @@ func (r *Rouse) HandleRDP(appConfig *config.AppConfig) {
 	}
 	cmd := handleRDP(r, filePath, appConfig)
 	if cmd != nil {
-		if err := cmd.Run(); err != nil {
-			reportErrorf("Failed to execute RDP application: %v", err)
-		}
+		runApplication(cmd, "RDP")
 	} else {
 		reportError("No RDP application configured or found")
 	}
@@ -143,9 +152,7 @@ func (r *Rouse) HandleRDP(appConfig *config.AppConfig) {
 func (r *Rouse) HandleVNC(appConfig *config.AppConfig) {
 	cmd := handleVNC(r, appConfig)
 	if cmd != nil {
-		if err := cmd.Run(); err != nil {
-			reportErrorf("Failed to execute VNC application: %v", err)
-		}
+		runApplication(cmd, "VNC")
 	} else {
 		reportError("No VNC application configured or found")
 	}
@@ -154,9 +161,7 @@ func (r *Rouse) HandleVNC(appConfig *config.AppConfig) {
 func (r *Rouse) HandleSSH(appConfig *config.AppConfig) {
 	cmd := handleSSH(r, appConfig)
 	if cmd != nil {
-		if err := cmd.Run(); err != nil {
-			reportErrorf("Failed to execute SSH application: %v", err)
-		}
+		runApplication(cmd, "SSH")
 	} else {
 		reportError("No SSH application configured or found")
 	}
@@ -165,9 +170,7 @@ func (r *Rouse) HandleSSH(appConfig *config.AppConfig) {
 func (r *Rouse) HandleDB(appConfig *config.AppConfig) {
 	cmd := handleDB(r, appConfig)
 	if cmd != nil {
-		if err := cmd.Run(); err != nil {
-			reportErrorf("Failed to execute database application: %v", err)
-		}
+		runApplication(cmd, "database")
 	} else {
 		reportError("No database application configured or found")
 	}
