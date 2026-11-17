@@ -13,16 +13,21 @@
 | DEB | `debian:11.11-slim` 容器 | 发行版 Qt 5.15.2、OpenSSL / CA 包 | amd64、arm64（aarch64）；Debian 11 用户空间 |
 | DEB（麒麟 V10 SP1） | `ubuntu:20.04` 容器，ARM64 runner | 发行版 Qt 5.12.8、OpenSSL / CA 包 | arm64（aarch64）；Qt 5.12 / glibc 2.31 用户空间 |
 | RPM | `rockylinux/rockylinux:8.10` 容器 | 发行版 Qt 5.15.3、OpenSSL / CA 包 | amd64、arm64（aarch64）；EL8 用户空间 |
+| RPM（麒麟服务器 V10 SP3） | Rocky Linux 8.10 容器，CentOS 8.0 历史仓库 Qt | Qt 5.11.1、OpenSSL / CA 包 | amd64（x86_64）；Qt 5.11 / glibc 2.28 用户空间 |
 
 银河麒麟 V10 SP1 只提供 Qt 5.12.12，Debian 11 的 Qt 5.15.2 产物会因
 `libqt5core5a (>= 5.15.1)` 等依赖和 `QByteArray::fromBase64Encoding`、`QWidget::screen()`
 等 5.15 符号无法安装或启动。`linux-kylin` job 因此单独使用 Qt 5.12 基线构建，
-产出 `OSMClient-<ver>-kylin-arm64.deb`。包名与安装路径统一为 `client`；
+产出 `OSMClient-<ver>-kylin_desktop-arm64.deb`。包名与安装路径统一为 `client`；
 下载文件名通过 `CLIENT_PACKAGE_VARIANT` 区分，避免与 Debian 包混淆。
+
+麒麟服务器 V10 SP3 x86_64 使用 Qt 5.11.1，`linux-kylin-rpm` 单独构建
+`OSMClient-<ver>-kylin-amd64.rpm`，构建完成后上传产物。
+Qt 开发包来自 CentOS 8.0 历史仓库，固定版本并校验 RPM 签名；历史仓库可用性会影响构建。
 
 Linux 构建分别在 Ubuntu 24.04 x86_64 和 ARM64 runner 的发行版容器内完成，镜像固定到各架构的 digest。RPM 使用原生 `rpmbuild`，不从 DEB 转换；Qt、libsecret 等由目标发行版包管理器提供。Debian 11 security 仓库迁移到 archive 后只调整仓库 URL 和过期元数据检查，保留包签名校验。Rocky 使用官方 HTTPS baseurl，避免地理镜像同步窗口导致的 404。
 
-这些是编译/打包基线，不能代替旧系统实机验收。统信 UOS 及其它麒麟版本仍需分别确认发行版版本、CPU、Qt 和 libsecret 包名/ABI、桌面与 SSH/RDP 外部客户端。当前 CI 只对麒麟 V10 SP1 arm64 提供 Qt 5.12 专用包，不承诺 UOS、其它麒麟版本、Windows 7/8、macOS 10.14 或其他 CPU 已兼容。其他目标可直接使用打包脚本和合适的本地工具链。Go 固定 1.21.13，沿用原项目 1.21 系列启动器基线；升级 Go 时需重新检查最低 OS 要求。
+这些是编译/打包基线，不能代替旧系统实机验收。统信 UOS 及其它麒麟版本仍需分别确认发行版版本、CPU、Qt 和 libsecret 包名/ABI、桌面与 SSH/RDP 外部客户端。麒麟 V10 SP1 arm64 和麒麟服务器 V10 SP3 x86_64 分别提供专用包，不承诺 UOS、其它麒麟版本、Windows 7/8、macOS 10.14 或其他 CPU 已兼容。其他目标可直接使用打包脚本和合适的本地工具链。Go 固定 1.21.13，沿用原项目 1.21 系列启动器基线；升级 Go 时需重新检查最低 OS 要求。
 
 ## 版本、签名与凭据
 
@@ -58,7 +63,7 @@ macOS/Windows 编译 Qt Base、Qt SVG、部署工具，关闭不用的 OpenGL、
 
 ## 验证范围
 
-流水线只构建、打包和校验安装包，不编译或运行测试程序。Linux 在第二个干净容器中安装生成的包，检查依赖、MIME 注册、有效载荷及 `--smoke-test`。Windows 在一次性 GitHub-hosted runner 上验证 EXE/MSI 安装、安装后启动、正常卸载，以及其他应用接管 `jms` 后卸载仍保留该处理器。macOS 打包脚本检查 Mach-O 依赖和签名；签名任务另外执行 Apple 公证及 stapler 验证。
+流水线只构建、打包和校验安装包，不编译或运行测试程序。通用 Linux 包和麒麟桌面版 DEB 在第二个干净容器中安装，检查依赖、MIME 注册、有效载荷及 `--smoke-test`；麒麟服务器 RPM 仅执行构建和打包检查。Windows 在一次性 GitHub-hosted runner 上验证 EXE/MSI 安装、安装后启动、正常卸载，以及其他应用接管 `jms` 后卸载仍保留该处理器。macOS 打包脚本检查 Mach-O 依赖和签名；签名任务另外执行 Apple 公证及 stapler 验证。
 
 GitHub macOS hosted runner 偶发 `hdiutil create - Resource busy` 时，DMG 创建最多尝试 10 次（失败后间隔 5 秒，最多 9 次重试），仅清理本次未完成的目标文件；之后仍执行镜像校验、挂载检查、依赖检查及可用的启动 smoke test，不降低安装包的验证范围。
 

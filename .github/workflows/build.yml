@@ -332,7 +332,7 @@ jobs:
       CLIENT_VERSION: ${{ needs.metadata.outputs.version }}
       BUILD_IMAGE: ubuntu:20.04@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214
       TARGET_ARCH: arm64
-      PACKAGE_VARIANT: kylin
+      PACKAGE_VARIANT: kylin_desktop
       QT5_MIN_VERSION: '5.12'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -382,8 +382,48 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  linux-kylin-rpm:
+    needs: metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CLIENT_VERSION: ${{ needs.metadata.outputs.version }}
+      BUILD_IMAGE: rockylinux/rockylinux:8.10@sha256:f5529992e67440c1a4ae7788244d4381c6909159a88eacd95b7523ae47ced82e
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go-client/go.sum
+      - name: Build target Go launchers
+        run: python scripts/build-launchers.py --goos linux --goarch amd64 --output helpers
+      - name: Build Kylin V10 SP3 amd64 RPM with Qt 5.11
+        run: |
+          mkdir -p dist
+          docker run --rm --platform linux/amd64 -e CLIENT_VERSION \
+            -v "$PWD:/src:ro" -v "$PWD/helpers:/helpers:ro" -v "$PWD/dist:/out" "$BUILD_IMAGE" sh -ec '
+              sh /src/packaging/linux/setup-kylin-qt511.sh
+              python3.9 /src/scripts/package-linux.py --format rpm --build /tmp/build --output /out \
+                --helpers /helpers --parallel 3 --cmake-arg "CLIENT_VERSION=$CLIENT_VERSION" \
+                --cmake-arg CLIENT_QT5_MIN_VERSION=5.11 --cmake-arg CLIENT_PACKAGE_VARIANT=kylin
+          '
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OSMClient-${{ needs.metadata.outputs.version }}-linux-amd64-kylin-rpm
+          path: |
+            dist/*.rpm
+            dist/*.manifest.json
+            dist/*.metadata.txt
+          if-no-files-found: error
+          retention-days: 14
+
   release:
-    needs: [metadata, macos, windows, linux, linux-kylin]
+    needs: [metadata, macos, windows, linux, linux-kylin, linux-kylin-rpm]
     if: (github.ref == 'refs/heads/osm-qt' || github.base_ref == 'osm-qt' || github.ref_type == 'tag') && (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     permissions:
@@ -413,8 +453,12 @@ jobs:
               }
             done
           done
-          test -f "release-assets/OSMClient-${CLIENT_VERSION}-kylin-arm64.deb" || {
+          test -f "release-assets/OSMClient-${CLIENT_VERSION}-kylin_desktop-arm64.deb" || {
             echo "Missing Kylin V10 SP1 arm64 DEB installer" >&2
+            exit 1
+          }
+          test -f "release-assets/OSMClient-${CLIENT_VERSION}-kylin-amd64.rpm" || {
+            echo "Missing Kylin V10 SP3 amd64 RPM installer" >&2
             exit 1
           }
         env:

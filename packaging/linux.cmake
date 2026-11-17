@@ -8,7 +8,7 @@ if(NOT _package_arch)
   set(_package_arch "${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 # Distribution-specific builds keep the same package identity so upgrades work,
-# but use a distinct download name, e.g. OSMClient-4.1.4-kylin-arm64.deb.
+# but use a distinct download name, e.g. OSMClient-4.1.4-kylin_desktop-arm64.deb.
 set(_package_variant "")
 if(CLIENT_PACKAGE_VARIANT)
   if(NOT CLIENT_PACKAGE_VARIANT MATCHES "^[a-z0-9_]+$")

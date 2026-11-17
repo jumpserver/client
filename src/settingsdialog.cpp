@@ -41,6 +41,58 @@
 #include <QVBoxLayout>
 using ClientTheme::text;
 namespace {
+class WrappingLayout : public QLayout {
+public:
+  explicit WrappingLayout(QWidget *parent = nullptr) : QLayout(parent) {
+    setContentsMargins(0, 0, 0, 0);
+    setSpacing(5);
+  }
+  ~WrappingLayout() override {
+    while (QLayoutItem *item = takeAt(0))
+      delete item;
+  }
+  void addItem(QLayoutItem *item) override { m_items.append(item); }
+  int count() const override { return m_items.size(); }
+  QLayoutItem *itemAt(int index) const override { return m_items.value(index); }
+  QLayoutItem *takeAt(int index) override {
+    return index >= 0 && index < m_items.size() ? m_items.takeAt(index) : nullptr;
+  }
+  Qt::Orientations expandingDirections() const override { return {}; }
+  bool hasHeightForWidth() const override { return true; }
+  int heightForWidth(int width) const override { return arrange(QRect(0, 0, width, 0), false); }
+  QSize minimumSize() const override {
+    QSize size;
+    for (const auto *item : m_items)
+      size = size.expandedTo(item->minimumSize());
+    return size;
+  }
+  QSize sizeHint() const override { return minimumSize(); }
+  void setGeometry(const QRect &rect) override {
+    QLayout::setGeometry(rect);
+    arrange(rect, true);
+  }
+
+private:
+  int arrange(const QRect &rect, bool apply) const {
+    int left = rect.x();
+    int top = rect.y();
+    int rowHeight = 0;
+    for (auto *item : m_items) {
+      const QSize size = item->sizeHint();
+      if (left > rect.x() && left + size.width() > rect.x() + rect.width()) {
+        left = rect.x();
+        top += rowHeight + spacing();
+        rowHeight = 0;
+      }
+      if (apply)
+        item->setGeometry(QRect(QPoint(left, top), size));
+      left += size.width() + spacing();
+      rowHeight = qMax(rowHeight, size.height());
+    }
+    return top - rect.y() + rowHeight;
+  }
+  QList<QLayoutItem *> m_items;
+};
 struct ProtocolSection {
   QString category;
   QString titleZh;
@@ -815,8 +867,10 @@ QWidget *SettingsDialog::applicationCard(const QJsonObject &item,
   info->addLayout(pathRow);
   header->addLayout(info, 1);
   outer->addLayout(header);
-  auto *badges = new QHBoxLayout;
-  badges->setSpacing(5);
+  auto *badgeRow = new QHBoxLayout;
+  badgeRow->setSpacing(5);
+  auto *badges = new WrappingLayout;
+  badgeRow->addLayout(badges, 1);
   QStringList supported;
   for (const QJsonValue &value : item.value("protocol").toArray())
     supported << value.toString().toUpper();
@@ -831,7 +885,6 @@ QWidget *SettingsDialog::applicationCard(const QJsonObject &item,
     more->setToolTip(supported.join(QStringLiteral(" · ")));
     badges->addWidget(more);
   }
-  badges->addStretch();
   const QUrl download(item.value("download_url").toString());
   if (download.isValid() && !download.host().isEmpty() &&
       (download.scheme() == QLatin1String("http") ||
@@ -840,11 +893,11 @@ QWidget *SettingsDialog::applicationCard(const QJsonObject &item,
     downloadButton->setObjectName("applicationDownload");
     downloadButton->setProperty("soft", true);
     downloadButton->setIcon(ClientTheme::icon("download"));
-    badges->addWidget(downloadButton, 0, Qt::AlignVCenter);
+    badgeRow->addWidget(downloadButton, 0, Qt::AlignTop);
     connect(downloadButton, &QPushButton::clicked, this,
             [download] { QDesktopServices::openUrl(download); });
   }
-  outer->addLayout(badges);
+  outer->addLayout(badgeRow);
   const QString comment = localizedComment(item);
   if (!comment.isEmpty()) {
     auto *description = new QLabel(comment, card);
