@@ -10,6 +10,7 @@
   "category": "databases",
   "protocols": [
     "mariadb",
+    "mongodb",
     "mysql",
     "oracle",
     "postgresql",
