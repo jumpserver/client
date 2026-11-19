@@ -11,6 +11,7 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDesktopServices>
+#include <QDialog>
 #include <QFrame>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -26,6 +27,7 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
@@ -40,14 +42,32 @@
 #include <QSystemTrayIcon>
 #include <QTableWidget>
 #include <QTimer>
+#include <QToolButton>
 #include <QVBoxLayout>
 #include <functional>
+#include <utility>
 using ClientTheme::text;
 namespace {
-class RestoreSpinner : public QWidget {
+class ApprovalDialog : public QDialog {
 public:
-  explicit RestoreSpinner(QWidget *parent = nullptr) : QWidget(parent) {
-    setFixedSize(36, 36);
+  using QDialog::QDialog;
+  void reject() override {
+    if (onCancel) onCancel();
+  }
+  std::function<void()> onCancel;
+};
+
+QString approvalDuration(qint64 seconds) {
+  return QStringLiteral("%1:%2:%3")
+      .arg(seconds / 3600, 2, 10, QLatin1Char('0'))
+      .arg(seconds / 60 % 60, 2, 10, QLatin1Char('0'))
+      .arg(seconds % 60, 2, 10, QLatin1Char('0'));
+}
+
+class BusySpinner : public QWidget {
+public:
+  explicit BusySpinner(int size, QWidget *parent = nullptr) : QWidget(parent) {
+    setFixedSize(size, size);
     m_timer.setInterval(30);
     connect(&m_timer, &QTimer::timeout, this, [this] {
       m_angle = (m_angle + 10) % 360;
@@ -66,12 +86,13 @@ protected:
   void paintEvent(QPaintEvent *) override {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
-    const QRectF ring = QRectF(rect()).adjusted(3, 3, -3, -3);
+    const int stroke = qMax(2, width() / 12);
+    const QRectF ring = QRectF(rect()).adjusted(stroke, stroke, -stroke, -stroke);
     QColor track = palette().color(QPalette::Text);
     track.setAlpha(25);
-    painter.setPen(QPen(track, 3));
+    painter.setPen(QPen(track, stroke));
     painter.drawEllipse(ring);
-    painter.setPen(QPen(palette().color(QPalette::Highlight), 3,
+    painter.setPen(QPen(palette().color(QPalette::Highlight), stroke,
                         Qt::SolidLine, Qt::RoundCap));
     painter.drawArc(ring, -m_angle * 16, 100 * 16);
   }
@@ -384,7 +405,6 @@ MainWindow::MainWindow(AppService *service, ConfigStore *config,
     : QMainWindow(parent), m_service(service), m_config(config),
       m_launcher(launcher) {
   setWindowTitle("OSMClient");
-  setWindowIcon(ClientTheme::applicationIcon());
   setMinimumSize(800, 480);
   resize(1000, 600);
   ClientTheme::apply();
@@ -418,11 +438,14 @@ MainWindow::MainWindow(AppService *service, ConfigStore *config,
       renderAssets();
       m_empty->setText(text("资产加载失败，请重试", "Failed to load assets. Please retry."));
     }
-    m_connectionInFlight = false;
+    if (!m_service->connectionInProgress()) m_connectionInFlight = false;
     updateLoginState();
     m_pendingAsset = {};
     m_waitingDetail = {};
-    m_connectionQueue.clear();
+    if (!m_service->connectionInProgress()) {
+      m_connectionQueue.clear();
+      setConnectionProgress(ConnectionProgress::Idle);
+    }
     m_refreshButton->setEnabled(m_service->authenticated());
     showError(message, statusOnly);
   });
@@ -607,10 +630,27 @@ MainWindow::MainWindow(AppService *service, ConfigStore *config,
               }
             }
           });
+  connect(service, &AppService::contextChanged, this, [this] {
+    closeConnectionApproval();
+    setConnectionProgress(ConnectionProgress::Idle);
+  });
+  connect(service, &AppService::connectionApprovalRequired, this, &MainWindow::showConnectionApproval);
+  connect(service, &AppService::connectionFinished, this, [this](const QString &failure) {
+    closeConnectionApproval();
+    m_connectionInFlight = false;
+    m_connectionQueue.clear();
+    setConnectionProgress(ConnectionProgress::Idle);
+    if (!failure.isEmpty()) showError(failure);
+  });
+  connect(service, &AppService::clientUrlReady, this, [this] {
+    setConnectionProgress(ConnectionProgress::Launching);
+    closeConnectionApproval();
+  });
   connect(service, &AppService::clientUrlReady, launcher, &Launcher::launch);
   connect(launcher, &Launcher::started, this, [this] {
     m_connectionInFlight = false;
-    statusBar()->showMessage(text("已启动本地客户端", "Local client started"),
+    setConnectionProgress(ConnectionProgress::Idle);
+    statusBar()->showMessage(text("已交给本地启动器", "Handed off to local launcher"),
                              5000);
     processNextConnection();
   });
@@ -619,6 +659,7 @@ MainWindow::MainWindow(AppService *service, ConfigStore *config,
     m_connectionQueue.clear();
     m_pendingAsset = {};
     m_waitingDetail = {};
+    setConnectionProgress(ConnectionProgress::Idle);
     showError(message);
   });
   auto *findShortcut = new QShortcut(QKeySequence::Find, this);
@@ -672,6 +713,11 @@ void MainWindow::buildUi() {
   side->setSpacing(10);
   auto *brandRow = new QHBoxLayout;
   brandRow->setSpacing(8);
+  auto *brandIcon = new QLabel;
+  brandIcon->setFixedSize(20, 20);
+  brandIcon->setPixmap(QIcon(QStringLiteral(":/icons/icon.png")).pixmap(20, 20));
+  brandIcon->setAlignment(Qt::AlignCenter);
+  brandRow->addWidget(brandIcon);
   auto *brand = new QLabel("OSMClient");
   brand->setObjectName("brandName");
   brandRow->addWidget(brand, 1);
@@ -733,10 +779,11 @@ void MainWindow::buildUi() {
   profileRow->addWidget(m_logout);
   connect(m_logout, &QPushButton::clicked, m_service, &AppService::logout);
   side->addWidget(profilePanel);
-  connect(m_collapse, &QPushButton::clicked, this, [this, sidebar, brand] {
+  connect(m_collapse, &QPushButton::clicked, this, [this, sidebar, brand, brandIcon] {
     m_collapsed = !m_collapsed;
     sidebar->setFixedWidth(m_collapsed ? 75 : 220);
     brand->setVisible(!m_collapsed);
+    brandIcon->setVisible(!m_collapsed);
     m_search->setVisible(!m_collapsed);
     m_catalogLabel->setVisible(!m_collapsed);
     m_profile->setVisible(!m_collapsed);
@@ -1016,6 +1063,17 @@ void MainWindow::buildUi() {
   m_pageLabel->setProperty("role", "caption");
   footer->addWidget(m_pageLabel);
   footer->addStretch();
+  m_connectionProgressWidget = new QWidget;
+  m_connectionProgressWidget->setObjectName("connectionProgress");
+  auto *connectionProgressRow = new QHBoxLayout(m_connectionProgressWidget);
+  connectionProgressRow->setContentsMargins(0, 0, 0, 0);
+  connectionProgressRow->setSpacing(6);
+  connectionProgressRow->addWidget(new BusySpinner(16), 0, Qt::AlignVCenter);
+  m_connectionProgressLabel = new QLabel;
+  m_connectionProgressLabel->setProperty("role", "caption");
+  connectionProgressRow->addWidget(m_connectionProgressLabel);
+  m_connectionProgressWidget->hide();
+  footer->addWidget(m_connectionProgressWidget);
   m_connectButton = new QPushButton;
   m_connectButton->setObjectName("connectSelected");
   m_connectButton->setProperty("soft", true);
@@ -1056,7 +1114,7 @@ void MainWindow::buildUi() {
   restoreLayout->setContentsMargins(24, 24, 24, 24);
   restoreLayout->setSpacing(18);
   restoreLayout->addStretch();
-  restoreLayout->addWidget(new RestoreSpinner, 0, Qt::AlignHCenter);
+  restoreLayout->addWidget(new BusySpinner(36), 0, Qt::AlignHCenter);
   m_restoreTitle = new QLabel;
   m_restoreTitle->setObjectName("restoreSessionTitle");
   m_restoreTitle->setProperty("muted", true);
@@ -1083,6 +1141,7 @@ void MainWindow::buildUi() {
   if (QSettings().value("appearance/sidebarCollapsed", false).toBool()) m_collapse->click();
 }
 void MainWindow::retranslateUi() {
+  setConnectionProgress(m_connectionProgress);
   m_restoreTitle->setText(text("正在恢复登录…", "Restoring your session…"));
   m_cancelRestore->setText(text("返回登录", "Back to sign in"));
   m_switcher->setText(text("切换站点", "Switch site"));
@@ -1305,7 +1364,8 @@ void MainWindow::renderAssets() {
 void MainWindow::updateSelectionUi() {
   const int selected = selectedAssets().size();
   m_connectButton->setVisible(selected > 0);
-  m_connectButton->setEnabled(m_service->authenticated() && selected > 0);
+  m_connectButton->setEnabled(m_service->authenticated() && selected > 0 &&
+                              !m_connectionInFlight && m_pendingAsset.isEmpty());
   m_connectButton->setText(text("连接所选 (%1)", "Connect selected (%1)").arg(selected));
 }
 QJsonObject MainWindow::selectedAsset(bool grid) const {
@@ -1500,8 +1560,7 @@ void MainWindow::requestConnection(const QJsonObject &asset, bool editOnly,
   m_pendingAsset = asset;
   m_editOnly = editOnly;
   m_pendingProtocol = protocol;
-  statusBar()->showMessage(
-      text("正在读取连接权限…", "Loading connection permissions…"));
+  setConnectionProgress(ConnectionProgress::Permissions);
   if (!m_methodsLoaded) {
     const QString id = asset.value("id").toString();
     m_service->lookupMethods([this, id](QJsonValue value, QString failure) {
@@ -1554,13 +1613,16 @@ void MainWindow::consumeDetails(const QString &id, const QJsonObject &details) {
                           editOnly, m_pendingProtocol, this);
   connect(m_service, &AppService::contextChanged, &dialog, &QDialog::reject);
   statusBar()->clearMessage();
-  const bool accepted =
-      (!editOnly && !forceDialog && dialog.tryDirectConnection(!m_pendingProtocol.isEmpty())) ||
-      dialog.exec() == QDialog::Accepted;
+  bool accepted = !editOnly && !forceDialog && dialog.tryDirectConnection(!m_pendingProtocol.isEmpty());
+  if (!accepted) {
+    setConnectionProgress(ConnectionProgress::Idle);
+    accepted = dialog.exec() == QDialog::Accepted;
+  }
   if (accepted && m_service->authenticated() && scope() == connectionScope && m_service->contextRevision() == connectionContext) {
     renderAssets();
     if (!editOnly) {
       m_connectionInFlight = true;
+      setConnectionProgress(ConnectionProgress::Connecting);
       m_service->connection(dialog.requestBody(), dialog.extraParameters());
     } else
       processNextConnection();
@@ -1577,6 +1639,158 @@ void MainWindow::processNextConnection() {
   auto asset = m_connectionQueue.takeFirst();
   requestConnection(asset);
 }
+
+void MainWindow::setConnectionProgress(ConnectionProgress progress) {
+  m_connectionProgress = progress;
+  switch (progress) {
+  case ConnectionProgress::Idle:
+    m_connectionProgressLabel->clear();
+    break;
+  case ConnectionProgress::Permissions:
+    m_connectionProgressLabel->setText(text("正在读取连接权限…", "Checking connection permissions…"));
+    break;
+  case ConnectionProgress::Connecting:
+    m_connectionProgressLabel->setText(text("正在准备连接…", "Preparing connection…"));
+    break;
+  case ConnectionProgress::Launching:
+    m_connectionProgressLabel->setText(text("正在启动本地客户端…", "Starting local launcher…"));
+    break;
+  }
+  m_connectionProgressWidget->setVisible(progress != ConnectionProgress::Idle);
+  updateSelectionUi();
+}
+
+void MainWindow::showConnectionApproval() {
+  setConnectionProgress(ConnectionProgress::Idle);
+  auto *dialog = new ApprovalDialog(this, Qt::Dialog | Qt::FramelessWindowHint);
+  m_approvalDialog = dialog;
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  dialog->setWindowTitle(text("登录提醒", "Login reminder"));
+  dialog->setMinimumWidth(400);
+  auto *root = new QVBoxLayout(dialog);
+  root->setContentsMargins(0, 0, 0, 0);
+  root->setSpacing(0);
+  auto *header = new QFrame(dialog);
+  header->setObjectName("dialogHeader");
+  auto *headerLayout = new QHBoxLayout(header);
+  headerLayout->setContentsMargins(20, 10, 12, 10);
+  auto *title = new QLabel(dialog->windowTitle(), header);
+  title->setProperty("role", "dialogTitle");
+  headerLayout->addWidget(title, 1);
+  auto *closeButton = new QToolButton(header);
+  closeButton->setObjectName("approvalCloseButton");
+  closeButton->setProperty("quiet", true);
+  closeButton->setFixedSize(32, 32);
+  closeButton->setStyleSheet(QStringLiteral("padding: 0;"));
+  closeButton->setIconSize(QSize(16, 16));
+  closeButton->setIcon(ClientTheme::icon("close"));
+  closeButton->setToolTip(text("关闭", "Close"));
+  closeButton->setAccessibleName(closeButton->toolTip());
+  headerLayout->addWidget(closeButton);
+  root->addWidget(header);
+
+  auto *layout = new QVBoxLayout;
+  layout->setContentsMargins(20, 16, 20, 16);
+  layout->setSpacing(8);
+  root->addLayout(layout);
+  auto *message = new QLabel(text("此资产的连接需要审批，是否发起申请？",
+                                  "Connecting to this asset requires approval. Submit a request?"));
+  message->setTextFormat(Qt::PlainText);
+  message->setWordWrap(true);
+  layout->addWidget(message);
+  auto *duration = new QLabel;
+  duration->setObjectName("approvalCountdown");
+  duration->setWordWrap(true);
+  duration->hide();
+  layout->addWidget(duration);
+  auto *progress = new QProgressBar;
+  progress->setRange(0, 0);
+  progress->hide();
+  layout->addWidget(progress);
+
+  auto *buttons = new QHBoxLayout;
+  buttons->setSpacing(10);
+  layout->addSpacing(12);
+  layout->addLayout(buttons);
+  buttons->addStretch();
+  auto *copy = new QPushButton(text("复制工单链接", "Copy ticket link"));
+  auto *cancel = new QPushButton(text("取消", "Cancel"));
+  auto *submit = new QPushButton(text("发起审批", "Submit request"));
+  submit->setProperty("primary", true);
+  copy->hide();
+  buttons->addWidget(copy);
+  buttons->addWidget(cancel);
+  buttons->addWidget(submit);
+  submit->setFocus();
+
+  auto *timer = new QTimer(dialog);
+  const auto setCancelable = [cancel, closeButton](bool enabled) {
+    cancel->setEnabled(enabled);
+    closeButton->setEnabled(enabled);
+  };
+  connect(m_service, &AppService::connectionApprovalClosing, dialog, [=] {
+    setCancelable(false);
+    timer->stop();
+    duration->hide();
+    message->setText(text("正在关闭审批工单…", "Closing the approval ticket…"));
+  });
+  dialog->onCancel = [=] {
+    if (!cancel->isEnabled()) return;
+    m_service->cancelConnectionApproval();
+  };
+  connect(submit, &QPushButton::clicked, dialog, [=] {
+    submit->setEnabled(false);
+    setCancelable(false);
+    message->setText(text("正在提交审批申请…", "Submitting approval request…"));
+    progress->show();
+    m_service->confirmConnectionApproval();
+  });
+  connect(closeButton, &QToolButton::clicked, dialog, &QDialog::reject);
+  connect(cancel, &QPushButton::clicked, dialog, [=] { dialog->reject(); });
+  connect(m_service, &AppService::connectionApprovalWaiting, dialog,
+          [=](const QStringList &assignees, const QUrl &detailUrl, const QDateTime &expiresAt) {
+    if (!detailUrl.isEmpty()) {
+      connect(copy, &QPushButton::clicked, dialog, [copy, detailUrl] {
+        QGuiApplication::clipboard()->setText(detailUrl.toString(QUrl::FullyEncoded));
+        copy->setText(text("已复制", "Copied"));
+      });
+      copy->show();
+    }
+    message->setText(text("审批申请已提交。请保持窗口打开，审批通过后将自动继续连接。",
+                          "Request submitted. Keep this window open to connect automatically after approval.")
+                     + (assignees.isEmpty() ? QString()
+                          : QStringLiteral("\n\n") + text("审批人：%1", "Approvers: %1").arg(assignees.join(", "))));
+    progress->show();
+    submit->hide();
+    cancel->setText(text("取消审批", "Cancel request"));
+    setCancelable(true);
+    if (expiresAt.isValid()) {
+      const auto updateDuration = [this, duration, expiresAt] {
+        const auto remaining = QDateTime::currentDateTimeUtc().msecsTo(expiresAt);
+        const auto seconds = remaining > 0 ? (remaining + 999) / 1000 : 0;
+        duration->setText(text("剩余时间：%1", "Time remaining: %1").arg(approvalDuration(seconds)));
+        if (seconds == 0) m_service->expireConnectionApproval();
+      };
+      connect(timer, &QTimer::timeout, dialog, updateDuration);
+      duration->show();
+      timer->start(1000);
+      updateDuration();
+    }
+    dialog->adjustSize();
+  });
+  connect(m_service, &AppService::connectionApprovalApproved, dialog, [=] {
+    timer->stop();
+    duration->hide();
+    setCancelable(false);
+    message->setText(text("审批已通过，正在连接…", "Approved. Connecting…"));
+  });
+  dialog->open();
+}
+
+void MainWindow::closeConnectionApproval() {
+  if (auto *dialog = std::exchange(m_approvalDialog, nullptr)) dialog->done(QDialog::Accepted);
+}
+
 void MainWindow::updateSessionUi() {
   updateLoginState();
   const bool active = m_service->authenticated();

@@ -1,9 +1,7 @@
 <RCC><qresource prefix="/">
 <file alias="config.json">config.json</file>
-<file alias="icon.icns">icon.icns</file>
 <file alias="icon.ico">icon.ico</file>
 <file alias="icon.png">icon.png</file>
-<file alias="app-icon-macos.png">app-icon-macos.png</file>
 <file alias="icons/browser.png">icons/browser.png</file>
 <file alias="icons/clickhouse.png">icons/clickhouse.png</file>
 <file alias="icons/dameng.png">icons/dameng.png</file>

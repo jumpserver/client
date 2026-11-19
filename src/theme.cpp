@@ -164,11 +164,11 @@ public:
       {"star", "<path d='m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z'/>"},
       {"search", "<circle cx='10.5' cy='10.5' r='6.5'/><path d='m16 16 4 4'/>"},
       {"sidebar", "<rect x='3' y='4' width='18' height='16' rx='3'/><path d='M9 4v16M6 8h.01M6 11h.01'/>"},
-      {"refresh", "<path d='M20 7v5h-5M4 17v-5h5M5.6 7a7 7 0 0 1 12.2-1L20 9M4 15l2.2 3a7 7 0 0 0 12.2-1'/>"},
+      {"refresh", "<path d='M21 3.5v5h-5M20.5 15a9 9 0 1 1-2.1-9.4L21 8.5'/>"},
       {"sort", "<path d='M8 4v16m-4-4 4 4 4-4M14 5h7M14 10h5M14 15h3'/>"},
       {"grid", "<rect x='3' y='3' width='7' height='7' rx='1.5'/><rect x='14' y='3' width='7' height='7' rx='1.5'/><rect x='3' y='14' width='7' height='7' rx='1.5'/><rect x='14' y='14' width='7' height='7' rx='1.5'/>"},
       {"list", "<path d='M9 5h12M9 12h12M9 19h12M3 5h1M3 12h1M3 19h1'/>"},
-      {"settings", "<path d='m9 3-.5 3-2 1-2.8-1L2 9l2.3 2v2L2 15l1.7 3 2.8-1 2 1 .5 3h6l.5-3 2-1 2.8 1 1.7-3-2.3-2v-2L22 9l-1.7-3-2.8 1-2-1L15 3Z'/><circle cx='12' cy='12' r='3'/>"},
+      {"settings", "<path d='M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z'/><circle cx='12' cy='12' r='3'/>"},
       {"user", "<circle cx='12' cy='8' r='4'/><path d='M5 21v-2a7 7 0 0 1 14 0v2'/>"},
       {"logout", "<path d='M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4M10 12h11m-4-4 4 4-4 4'/>"},
       {"chevron-left", "<path d='m14 6-6 6 6 6'/>"},
@@ -310,13 +310,6 @@ QString text(const char *zh, const char *en) {
 }
 Colors colors() { return paletteColors(qApp->palette().color(QPalette::Window).lightness() < 128); }
 QIcon icon(const QString &name) { return QIcon(new LineIconEngine(name)); }
-QIcon applicationIcon() {
-#ifdef Q_OS_MACOS
-  return QIcon(":/app-icon-macos.png");
-#else
-  return QIcon(":/icons/icon.png");
-#endif
-}
 void apply() {
   auto *observer = paletteObserver();
   if (observer->applying) return;
@@ -354,6 +347,7 @@ QLabel[role=caption] { font-size: 12px; }
 QLabel[role=dialogTitle] { font-size: 19px; font-weight: 600; }
 QLabel[role=sectionTitle] { font-size: 14px; font-weight: 600; }
 QLabel[role=validation] { color: @muted@; padding: 2px 0; }
+QLabel#approvalCountdown { color: @approvalCountdown@; font-weight: 600; }
 QLabel#brandName { font-size: 14px; font-weight: 600; }
 QLabel#welcomeTitle { font-size: 22px; font-weight: 600; }
 QFrame#sidebar, QFrame#settingsSidebar { background: @sidebar@; border: none; border-right: 1px solid @border@; }
@@ -472,6 +466,7 @@ QStatusBar::item { border: none; }
     {"searchBackground", blend(c.sidebar, c.panel, 0.65)},
     {"accent", c.accent}, {"softAccent", c.softAccent},
     {"softHover", blend(c.panel, c.accent, 0.17)},
+    {"approvalCountdown", QColor(dark ? "#ffb454" : "#9a4300")},
     {"scroll", blend(c.panel, c.muted, 0.55)},
     {"scrollHover", blend(c.panel, c.muted, 0.85)}
   };

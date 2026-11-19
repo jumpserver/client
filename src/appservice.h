@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QDateTime>
 #include <QNetworkProxy>
 #include <QNetworkAccessManager>
 #include <QTcpServer>
@@ -40,6 +41,10 @@ public:
     void favorite(QString id, bool enabled);
     void rename(QString id, QString name);
     void connection(QJsonObject body, QJsonObject extra = QJsonObject());
+    bool connectionInProgress() const { return m_connection.stage != ConnectionStage::Idle; }
+    void confirmConnectionApproval();
+    void cancelConnectionApproval();
+    bool expireConnectionApproval();
     void metadata();
     void applyProxy();
 signals:
@@ -56,18 +61,34 @@ signals:
     void favoriteFinished(QString id, bool enabled, bool success);
     void changed();
     void clientUrlReady(QString url);
+    void connectionApprovalRequired();
+    void connectionApprovalWaiting(QStringList assignees, QUrl detailUrl, QDateTime expiresAt);
+    void connectionApprovalClosing();
+    void connectionApprovalApproved();
+    void connectionFinished(QString failure);
     void authorizationUrlReady(QUrl url);
 private:
     friend class TestAppService;
     friend class TestUi;
     using Result = std::function<void(QJsonValue, QString, int)>;
     using Ready = std::function<void(bool)>;
+    enum class ConnectionStage { Idle, Requesting, Confirming, Submitting, Waiting, Canceling, Launching };
+    struct ConnectionAttempt {
+        ConnectionStage stage = ConnectionStage::Idle;
+        QJsonObject body, extra;
+        QString tokenId, checkPath, closePath;
+        QDateTime expiresAt;
+        int pollFailures = 0;
+    };
     QThread m_networkThread;
     NetworkWorker *m_worker = nullptr;
     QString m_proxyMode, m_proxyAddress;
     QTcpServer m_callback;
     QTimer m_loginTimer;
     QTimer m_sessionTimer;
+    QTimer m_ticketTimer;
+    ConnectionAttempt m_connection;
+    quint64 m_connectionRevision = 0;
     QString m_site, m_org, m_access, m_refresh, m_clientId;
     QString m_state, m_verifier, m_redirect;
     qint64 m_expires = 0;
@@ -93,6 +114,12 @@ private:
     void loadIdentity();
     bool applyToken(const QJsonObject &token);
     void ensureToken(Ready ready, bool force = false);
+    void clearConnection();
+    void finishConnection(const QString &failure = QString());
+    void requestConnectionToken(bool createTicket);
+    void pollConnectionApproval();
+    void closeConnectionApproval(bool timedOut);
+    void resolveClientUrl(bool approved);
     void request(const QByteArray &method, const QString &path, const QUrlQuery &query,
                  const QByteArray &body, const QByteArray &contentType, bool authenticated, Result result);
     void api(const QByteArray &method, const QString &path, const QUrlQuery &query,

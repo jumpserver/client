@@ -38,7 +38,6 @@ struct Colors {
 QString text(const char *zh, const char *en);
 Colors colors();
 QIcon icon(const QString &name);
-QIcon applicationIcon();
 QRect dialogAvailableGeometry(const QWidget *dialog, bool initialPlacement);
 void positionDialog(QWidget *dialog, bool initialPlacement, int verticalOffset = 24);
 void apply();

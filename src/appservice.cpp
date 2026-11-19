@@ -16,12 +16,16 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <utility>
 
 namespace {
 const QString oauthRoot = QStringLiteral("/core/auth/oauth2-provider/");
 const QString assetRoot = QStringLiteral("/api/v1/perms/users/self/assets/");
 const QString methodsSuperseded = QStringLiteral("__client_methods_superseded__");
 const QString versionPath = QStringLiteral("/api/v1/settings/client/versions/");
+const QString connectionTokenPath = QStringLiteral("/api/v1/authentication/connection-token/");
+const QString ticketRoot = QStringLiteral("/api/v1/tickets/tickets/");
+constexpr int ticketPollIntervalMs = 3000;
 
 QString majorMinorVersion(const QString &version)
 {
@@ -136,10 +140,32 @@ QString connectionFailureReason(const QByteArray &bytes)
         if (object.contains(field.first)) invalid.append(field.second);
     return invalid.isEmpty() ? QString() : AppService::tr("站点拒绝以下连接参数：%1").arg(invalid.join("、"));
 }
+
+bool sameSiteUrl(const QUrl &url, const QUrl &site)
+{
+    const int defaultPort = site.scheme() == "https" ? 443 : 80;
+    return url.isValid() && url.scheme() == site.scheme() && url.host() == site.host()
+        && url.port(defaultPort) == site.port(defaultPort) && !url.authority(QUrl::FullyEncoded).contains('@');
+}
+
+QString ticketApiPath(const QJsonObject &endpoint, const QByteArray &method, const QString &path, const QUrl &site)
+{
+    if (endpoint.value("method").toString() != QString::fromLatin1(method)) return {};
+    const QUrl url(endpoint.value("url").toString(), QUrl::StrictMode);
+    if (!url.isValid() || url.hasQuery() || url.hasFragment()) return {};
+    const QString encodedPath = url.path(QUrl::FullyEncoded);
+    const QString mountedPath = site.path(QUrl::FullyEncoded) + path;
+    if (url.isRelative() && url.authority().isEmpty() && (encodedPath == path || encodedPath == mountedPath))
+        return path;
+    if (sameSiteUrl(url, site) && encodedPath == mountedPath) return path;
+    return {};
+}
 }
 
 AppService::AppService(QObject *parent) : QObject(parent), m_callback(this)
 {
+    m_ticketTimer.setSingleShot(true);
+    connect(&m_ticketTimer, &QTimer::timeout, this, &AppService::pollConnectionApproval);
     m_worker = new NetworkWorker;
     m_worker->moveToThread(&m_networkThread);
     connect(&m_networkThread, &QThread::finished, m_worker, &QObject::deleteLater);
@@ -233,6 +259,7 @@ void AppService::setLoginPending(bool pending)
 
 void AppService::resetSession()
 {
+    clearConnection();
     ++m_generation; ++m_assetRequest; ++m_orgGeneration;
     const auto generation = m_generation;
     QMetaObject::invokeMethod(m_worker, [worker = m_worker, generation] {
@@ -494,6 +521,7 @@ void AppService::logout()
 void AppService::setOrg(QString org)
 {
     if (m_org == org) return;
+    clearConnection();
     m_org = org; ++m_orgGeneration; ++m_assetRequest;
     emit contextChanged();
 }
@@ -516,7 +544,7 @@ void AppService::request(const QByteArray &method, const QString &path, const QU
     if (auth) request.setRawHeader("Authorization", "Bearer " + m_access.toUtf8());
     if (auth && !m_org.isEmpty()) request.setRawHeader("X-JMS-ORG", m_org.toUtf8());
     const auto generation = m_generation;
-    const auto completion = [this, generation, result, path](NetworkResult response) {
+    const auto completion = [this, generation, result, method, path](NetworkResult response) {
         if (generation != m_generation) return;
         if (checkSessionExpiry()) return;
         const int code = response.status;
@@ -534,15 +562,30 @@ void AppService::request(const QByteArray &method, const QString &path, const QU
             else if (response.error == QNetworkReply::HostNotFoundError)
                 failure = tr("站点域名解析失败，请检查 DNS 与网络配置");
             else failure = tr("网络请求失败或超时，请检查网络与站点地址");
-            if (code == 400 && path.startsWith("/api/v1/authentication/connection-token/")) {
+            if (code == 400 && response.failure.isEmpty() && path.startsWith(connectionTokenPath)) {
                 const auto bytes = response.body.left(65537);
-                const auto reason = bytes.size() <= 65536 ? connectionFailureReason(bytes) : QString();
-                if (!reason.isEmpty()) failure = reason + tr("（HTTP 400）");
+                if (bytes.size() <= 65536) {
+                    if (method == "POST" && path == connectionTokenPath) {
+                        const auto businessCode = QJsonDocument::fromJson(bytes).object().value("code").toString();
+                        if (businessCode == "acl_review" || businessCode == "acl_reject") {
+                            result(QJsonObject{{"code", businessCode}}, failure, code);
+                            return;
+                        }
+                    }
+                    const auto reason = connectionFailureReason(bytes);
+                    if (!reason.isEmpty()) failure = reason + tr("（HTTP 400）");
+                }
             }
             result({}, failure, code); return;
         }
         const auto bytes = response.body;
         if (bytes.trimmed().isEmpty()) { result({}, {}, code); return; }
+        if (method == "PUT" && path.startsWith(ticketRoot) && path.endsWith("/close/")) {
+            const auto acknowledgement = bytes.trimmed();
+            if (acknowledgement == "\"ok\"" || acknowledgement == "ok") {
+                result({}, {}, code); return;
+            }
+        }
         QJsonParseError parseError;
         const auto json = QJsonDocument::fromJson(bytes, &parseError);
         if (parseError.error != QJsonParseError::NoError) { result({}, tr("站点返回了无效 JSON"), code); return; }
@@ -709,26 +752,194 @@ void AppService::rename(QString id, QString name)
 
 void AppService::connection(QJsonObject body, QJsonObject extra)
 {
+    if (connectionInProgress()) return;
     if (body.value("asset").toString().isEmpty() || body.value("account").toString().isEmpty()
         || body.value("protocol").toString().isEmpty() || body.value("connect_method").toString().isEmpty()) {
-        emit error(tr("请选择资产、账号、协议和连接方式")); return;
+        emit connectionFinished(tr("请选择资产、账号、协议和连接方式")); return;
     }
-    api("POST", "/api/v1/authentication/connection-token/", {}, body,
-        [this, extra](QJsonValue value, QString failure, int) {
-            if (!failure.isEmpty()) { emit error(tr("创建连接令牌失败：%1").arg(failure)); return; }
-            const auto id = value.toObject().value("id").toString();
-            if (id.isEmpty()) { emit error(tr("站点未返回连接令牌 ID")); return; }
-            QUrlQuery query;
-            for (auto i = extra.begin(); i != extra.end(); ++i) addQueryItem(query, i.key(), i.value().toVariant().toString());
-            api("GET", "/api/v1/authentication/connection-token/" + pathId(id) + "/client-url/", query, {},
-                [this](QJsonValue response, QString failure, int) {
-                    if (!failure.isEmpty()) { emit error(tr("获取客户端连接地址失败：%1").arg(failure)); return; }
-                    const auto url = response.toObject().value("url").toString();
-                    // The payload is case-sensitive base64, not an RFC URL authority.
-                    // Validate without QUrl, and forward the original string unchanged.
-                    if (!Launcher::isConnectionUrl(url)) { emit error(tr("站点返回了无效客户端连接地址")); return; }
-                    emit clientUrlReady(url);
-                });
+    m_connection.stage = ConnectionStage::Requesting;
+    m_connection.body = std::move(body);
+    m_connection.extra = std::move(extra);
+    requestConnectionToken(false);
+}
+
+void AppService::clearConnection()
+{
+    m_ticketTimer.stop();
+    m_connection = {};
+    ++m_connectionRevision;
+}
+
+void AppService::finishConnection(const QString &failure)
+{
+    clearConnection();
+    emit connectionFinished(failure);
+}
+
+void AppService::confirmConnectionApproval()
+{
+    if (m_connection.stage != ConnectionStage::Confirming) return;
+    m_connection.stage = ConnectionStage::Submitting;
+    requestConnectionToken(true);
+}
+
+void AppService::requestConnectionToken(bool createTicket)
+{
+    QUrlQuery query;
+    if (createTicket) query.addQueryItem("create_ticket", "1");
+    auto body = createTicket ? std::exchange(m_connection.body, QJsonObject()) : m_connection.body;
+    api("POST", connectionTokenPath, query, std::move(body),
+        [this, revision = m_connectionRevision, createTicket](QJsonValue value, QString failure, int status) {
+            if (revision != m_connectionRevision) return;
+            const auto token = value.toObject();
+            const auto code = token.value("code").toString();
+            if (status == 400 && code == "acl_reject") {
+                finishConnection(tr("访问控制规则拒绝了本次连接。")); return;
+            }
+            if (status == 400 && code == "acl_review" && !createTicket) {
+                m_connection.stage = ConnectionStage::Confirming;
+                emit connectionApprovalRequired();
+                return;
+            }
+            m_connection.body = {};
+            if (!failure.isEmpty()) {
+                if (createTicket && (status == 0 || status >= 500))
+                    finishConnection(tr("无法确认审批是否已提交，请先到站点检查工单，避免重复提交：%1").arg(failure));
+                else
+                    finishConnection((createTicket ? tr("提交审批失败：%1") : tr("创建连接令牌失败：%1")).arg(failure));
+                return;
+            }
+            m_connection.tokenId = token.value("id").toString();
+            if (m_connection.tokenId.isEmpty()) {
+                finishConnection(tr("站点未返回连接令牌 ID")); return;
+            }
+            const auto ticket = token.value("from_ticket");
+            if (!ticket.isNull() && !ticket.isUndefined()) {
+                const auto ticketId = ticket.isObject() ? ticket.toObject().value("id").toString() : ticket.toString();
+                static const QRegularExpression uuid(QStringLiteral(
+                    "\\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\z"));
+                if (!uuid.match(ticketId).hasMatch()) {
+                    finishConnection(tr("站点返回了无效的审批工单信息，请到站点查看工单。")); return;
+                }
+                const auto info = token.value("from_ticket_info").toObject();
+                const QUrl site(m_site);
+                const auto ticketPath = ticketRoot + ticketId + '/';
+                m_connection.checkPath = ticketApiPath(info.value("check_ticket_api").toObject(), "GET", ticketPath, site);
+                m_connection.closePath = ticketApiPath(info.value("close_ticket_api").toObject(), "PUT", ticketPath + "close/", site);
+                if (m_connection.checkPath.isEmpty() || m_connection.closePath.isEmpty()) {
+                    finishConnection(tr("站点返回了无效的审批接口，请到站点查看工单。")); return;
+                }
+                QStringList assignees;
+                for (const auto &assignee : info.value("assignees").toArray()) {
+                    const auto name = assignee.toString().trimmed();
+                    if (!name.isEmpty()) assignees.append(name);
+                }
+                const auto detail = site.resolved(QUrl(info.value("ticket_detail_page_url").toString(), QUrl::StrictMode));
+                const auto detailPath = detail.path(QUrl::FullyEncoded);
+                const auto expires = token.value("date_expired").toString();
+                m_connection.expiresAt = QDateTime::fromString(expires, Qt::ISODateWithMs);
+                if (!m_connection.expiresAt.isValid()) m_connection.expiresAt = QDateTime::fromString(expires, Qt::ISODate);
+                m_connection.stage = ConnectionStage::Waiting;
+                m_ticketTimer.start(ticketPollIntervalMs);
+                emit connectionApprovalWaiting(assignees,
+                    sameSiteUrl(detail, site) && (detailPath == "/ui/" || detailPath == site.path(QUrl::FullyEncoded) + "/ui/")
+                        ? detail : QUrl(), m_connection.expiresAt);
+                return;
+            }
+            if (token.value("is_active") == QJsonValue(false)) {
+                finishConnection(tr("连接令牌未激活，无法继续连接。")); return;
+            }
+            resolveClientUrl(false);
+        });
+}
+
+void AppService::pollConnectionApproval()
+{
+    if (m_connection.stage != ConnectionStage::Waiting || expireConnectionApproval()) return;
+    api("GET", m_connection.checkPath, {}, {}, [this, revision = m_connectionRevision](QJsonValue value, QString failure, int status) {
+        if (revision != m_connectionRevision || m_connection.stage != ConnectionStage::Waiting || expireConnectionApproval()) return;
+        if (!failure.isEmpty()) {
+            if ((status == 0 || status >= 500) && ++m_connection.pollFailures < 3)
+                m_ticketTimer.start(ticketPollIntervalMs);
+            else
+                finishConnection(tr("无法继续查询审批状态，请到站点查看工单：%1").arg(failure));
+            return;
+        }
+        m_connection.pollFailures = 0;
+        const auto ticket = value.toObject();
+        const auto ticketStatus = ticket.value("status").toObject().value("value").toString();
+        const auto state = ticket.value("state").toObject().value("value").toString();
+        if (ticketStatus == "open" && state == "pending") {
+            m_ticketTimer.start(ticketPollIntervalMs); return;
+        }
+        if (ticketStatus == "closed") {
+            if (state == "approved") { resolveClientUrl(true); return; }
+            if (state == "rejected") { finishConnection(tr("本次资产连接的审批未通过。")); return; }
+            if (state == "closed") { finishConnection(tr("本次资产连接的审批工单已关闭。")); return; }
+        }
+        finishConnection(tr("无法识别站点返回的审批状态，请到站点查看工单。"));
+    });
+}
+
+void AppService::cancelConnectionApproval()
+{
+    if (m_connection.stage == ConnectionStage::Confirming) { finishConnection(); return; }
+    closeConnectionApproval(false);
+}
+
+bool AppService::expireConnectionApproval()
+{
+    if (m_connection.stage != ConnectionStage::Waiting || !m_connection.expiresAt.isValid()
+        || m_connection.expiresAt > QDateTime::currentDateTimeUtc()) return false;
+    closeConnectionApproval(true);
+    return true;
+}
+
+void AppService::closeConnectionApproval(bool timedOut)
+{
+    if (m_connection.stage != ConnectionStage::Waiting) return;
+    m_connection.stage = ConnectionStage::Canceling;
+    m_ticketTimer.stop();
+    const auto revision = m_connectionRevision;
+    emit connectionApprovalClosing();
+    if (revision != m_connectionRevision) return;
+    api("PUT", m_connection.closePath, {}, {}, [this, revision, timedOut](QJsonValue, QString failure, int) {
+        if (revision != m_connectionRevision) return;
+        const auto timeout = timedOut ? tr("审批等待已超时，请重新发起申请。") : QString();
+        if (failure.isEmpty()) {
+            finishConnection(timeout);
+        } else if (timedOut) {
+            finishConnection(timeout + QLatin1Char('\n') + tr("未能确认原工单已关闭，请先到站点查看：%1").arg(failure));
+        } else {
+            finishConnection(tr("已停止等待，但未能确认工单已关闭，请到站点查看：%1").arg(failure));
+        }
+    });
+}
+
+void AppService::resolveClientUrl(bool approved)
+{
+    m_connection.stage = ConnectionStage::Launching;
+    const auto revision = m_connectionRevision;
+    if (approved) emit connectionApprovalApproved();
+    if (revision != m_connectionRevision) return;
+    QUrlQuery query;
+    const auto &extra = m_connection.extra;
+    for (auto i = extra.begin(); i != extra.end(); ++i) addQueryItem(query, i.key(), i.value().toVariant().toString());
+    api("GET", connectionTokenPath + pathId(m_connection.tokenId) + "/client-url/", query, {},
+        [this, revision, approved](QJsonValue response, QString failure, int status) {
+            if (revision != m_connectionRevision) return;
+            if (!failure.isEmpty()) {
+                if (approved && (status == 400 || status == 403) && m_connection.expiresAt.isValid()
+                    && m_connection.expiresAt <= QDateTime::currentDateTimeUtc())
+                    finishConnection(tr("审批已通过，但连接令牌可能已过期。请重新发起连接。"));
+                else
+                    finishConnection((approved ? tr("审批已通过，但无法获取连接地址：%1") : tr("获取客户端连接地址失败：%1")).arg(failure));
+                return;
+            }
+            const auto url = response.toObject().value("url").toString();
+            if (!Launcher::isConnectionUrl(url)) { finishConnection(tr("站点返回了无效客户端连接地址")); return; }
+            clearConnection();
+            emit clientUrlReady(url);
         });
 }
 

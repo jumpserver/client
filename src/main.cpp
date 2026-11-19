@@ -86,7 +86,9 @@ int main(int argc, char **argv)
     QCoreApplication::setApplicationName("client");
     QApplication::setApplicationDisplayName("OSMClient");
     QCoreApplication::setApplicationVersion(CLIENT_QT_VERSION);
-    QApplication::setWindowIcon(ClientTheme::applicationIcon());
+#ifndef Q_OS_MACOS
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/icon.png")));
+#endif
     const bool smoke = app.arguments().contains("--smoke-test");
     QTemporaryDir smokeDirectory;
     if (smoke) {

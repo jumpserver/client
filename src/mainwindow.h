@@ -10,6 +10,7 @@ class AppService;
 class ConfigStore;
 class Launcher;
 class QComboBox;
+class QDialog;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -35,6 +36,7 @@ protected:
   void changeEvent(QEvent *) override;
 
 private:
+  enum class ConnectionProgress { Idle, Permissions, Connecting, Launching };
   void buildUi();
   void retranslateUi();
   void login();
@@ -47,6 +49,9 @@ private:
                          const QString &protocol = QString());
   void consumeDetails(const QString &, const QJsonObject &);
   void processNextConnection();
+  void setConnectionProgress(ConnectionProgress);
+  void showConnectionApproval();
+  void closeConnectionApproval();
   void updateSessionUi();
   void updateLoginState();
   void updateSelectionUi();
@@ -58,6 +63,7 @@ private:
   AppService *m_service;
   ConfigStore *m_config;
   Launcher *m_launcher;
+  QDialog *m_approvalDialog = nullptr;
   QListWidget *m_categories, *m_grid;
   QTableWidget *m_table;
   QLineEdit *m_search;
@@ -65,6 +71,8 @@ private:
   QStackedWidget *m_content, *m_views;
   QWidget *m_authTools;
   QWidget *m_restorePage;
+  QWidget *m_connectionProgressWidget;
+  QLabel *m_connectionProgressLabel;
   QLabel *m_restoreTitle;
   QPushButton *m_cancelRestore;
   QLabel *m_profile, *m_pageLabel, *m_empty, *m_loginMessage,
@@ -86,6 +94,7 @@ private:
   QJsonObject m_waitingDetail;
   QString m_pendingProtocol;
   QUrl m_authorizationUrl;
+  ConnectionProgress m_connectionProgress = ConnectionProgress::Idle;
   bool m_editOnly = false, m_methodsLoaded = false, m_loading = false,
        m_connectionInFlight = false, m_collapsed = false, m_restoring = false,
        m_forceConnectionDialog = false;

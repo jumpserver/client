@@ -26,9 +26,35 @@ func render(_ pixels: Int, to url: URL) throws {
         fatalError("Cannot create icon canvas")
     }
     context.interpolationQuality = .high
-    // The original shield touches the canvas edges. A 9% transparent inset
-    // gives it a visual size comparable to the other macOS Dock icons.
-    let scale = CGFloat(pixels) * 0.82 / CGFloat(max(image.width, image.height))
+    let canvas = CGFloat(pixels)
+    let tile = CGRect(x: canvas * 0.1, y: canvas * 0.1, width: canvas * 0.8, height: canvas * 0.8)
+    let radius = canvas * 0.21
+    let outline = CGPath(roundedRect: tile, cornerWidth: radius, cornerHeight: radius, transform: nil)
+    context.saveGState()
+    context.setShadow(offset: CGSize(width: 0, height: -canvas * 0.018), blur: canvas * 0.035,
+                      color: CGColor(gray: 0, alpha: 0.25))
+    context.setFillColor(gray: 0.76, alpha: 1)
+    context.addPath(outline)
+    context.fillPath()
+    context.restoreGState()
+
+    context.saveGState()
+    context.addPath(outline)
+    context.clip()
+    guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                    colors: [CGColor(gray: 0.88, alpha: 1), CGColor(gray: 0.72, alpha: 1)] as CFArray,
+                                    locations: [0, 1]) else {
+        fatalError("Cannot create icon background")
+    }
+    context.drawLinearGradient(gradient, start: CGPoint(x: tile.midX, y: tile.maxY),
+                               end: CGPoint(x: tile.midX, y: tile.minY), options: [])
+    context.setStrokeColor(gray: 1, alpha: 0.55)
+    context.setLineWidth(canvas * 0.012)
+    context.addPath(outline)
+    context.strokePath()
+    context.restoreGState()
+
+    let scale = canvas * 0.55 / CGFloat(max(image.width, image.height))
     let size = CGSize(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
     context.draw(image, in: CGRect(x: (CGFloat(pixels) - size.width) / 2,
                                    y: (CGFloat(pixels) - size.height) / 2,
@@ -47,11 +73,10 @@ for points in [16, 32, 128, 256, 512] {
         try render(points * density, to: iconset.appendingPathComponent("icon_\(points)x\(points)\(suffix).png"))
     }
 }
-try render(512, to: output.appendingPathComponent("app-icon-macos.png"))
 let process = Process()
 process.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
 process.arguments = ["-c", "icns", "-o", output.appendingPathComponent("icon.icns").path, iconset.path]
 try process.run()
 process.waitUntilExit()
 guard process.terminationStatus == 0 else { fatalError("iconutil failed") }
-print("Generated padded macOS PNG and ICNS (82% artwork, 9% inset)")
+print("Generated macOS ICNS with rounded gray background")
