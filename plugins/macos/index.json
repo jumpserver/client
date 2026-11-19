@@ -17,6 +17,11 @@
       "category": "databases"
     },
     {
+      "id": "macos.filezilla",
+      "name": "filezilla",
+      "category": "filetransfer"
+    },
+    {
       "id": "macos.iterm",
       "name": "iterm",
       "category": "terminal"

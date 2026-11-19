@@ -39,6 +39,7 @@ const imagesMap: Record<string, string | undefined> = {
   xftp: getImageByName("xftp"),
   xfreerdp: getImageByName("xfreerdp"),
   remmina: getImageByName("remmina"),
+  filezilla: getImageByName("filezilla"),
   plsql: getImageByName("plsql"),
   ssms17: getImageByName("ssms17"),
   resp: getImageByName("resp"),

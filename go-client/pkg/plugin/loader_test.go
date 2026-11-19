@@ -66,6 +66,66 @@ func TestLoadAppConfigSanitizesLegacyMacSelections(t *testing.T) {
 	}
 }
 
+func TestLoadAppConfigLoadsFileZillaSFTP(t *testing.T) {
+	if osKey() != "macos" {
+		t.Skip("macOS-specific FileZilla plugin")
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoRoot := filepath.Clean(filepath.Join(wd, "..", "..", ".."))
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(wd)
+	})
+
+	configDir := t.TempDir()
+	config := `{"_plugins":{"enabled":true}}`
+	state := `{
+  "version": 1,
+  "selections": {
+    "filetransfer:sftp": "macos.filezilla"
+  },
+  "plugins": {
+    "macos.filezilla": {"enabled": true}
+  }
+}`
+
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(config), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "plugins-state.json"), []byte(state), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, ok := LoadAppConfig(configDir)
+	if !ok {
+		t.Fatal("expected plugin config to load")
+	}
+
+	for _, item := range cfg.MacOS.FileTransfer {
+		if item.Name != "filezilla" {
+			continue
+		}
+		if item.Path != "/Applications/FileZilla.app/Contents/MacOS/filezilla" {
+			t.Fatalf("unexpected FileZilla executable path: %s", item.Path)
+		}
+		if item.ArgFormat != "sftp://{username}:{value}@{host}:{port}" {
+			t.Fatalf("unexpected FileZilla launch template: %s", item.ArgFormat)
+		}
+		if !item.IsMatchProtocol("sftp") {
+			t.Fatal("expected FileZilla to be selected for SFTP")
+		}
+		return
+	}
+
+	t.Fatal("expected FileZilla SFTP plugin to be loaded")
+}
+
 func TestBuildMatchFirstUsesSelectionsOnly(t *testing.T) {
 	selections := map[string]string{
 		"terminal:ssh": "windows.putty",
