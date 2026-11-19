@@ -28,6 +28,7 @@ ICON_MAP: dict[str, str] = {
     "windows_rdm": "windows_rdm",
     "tigervnc": "tigerVnc",
     "realvnc": "realvnc",
+    "filezilla": "filezilla",
     "winscp": "winscp",
     "securefx": "securecrt",
     "xftp": "xftp",
