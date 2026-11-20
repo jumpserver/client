@@ -638,6 +638,8 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
   buttons->button(QDialogButtonBox::Close)->setText(text("关闭", "Close"));
   buttons->button(QDialogButtonBox::Close)->setMinimumWidth(88);
   buttons->button(QDialogButtonBox::Close)->setProperty("primary", true);
+  buttons->button(QDialogButtonBox::Close)->setMinimumSize(
+      ClientTheme::buttonSize(buttons->button(QDialogButtonBox::Close)).expandedTo(QSize(88, 32)));
   connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
   footerLayout->addWidget(buttons);
   layout->addWidget(footer);
@@ -708,7 +710,11 @@ void SettingsDialog::retranslateUi() {
   for (auto *button : about->findChildren<QPushButton *>()) button->setText(text("下载客户端", "Download client"));
   auto *footer = findChild<QFrame *>("dialogFooter");
   for (auto *label : footer->findChildren<QLabel *>()) label->setText(text("更改会自动保存", "Changes are saved automatically"));
-  footer->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Close)->setText(text("关闭", "Close"));
+  auto *closeButton = footer->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Close);
+  closeButton->setText(text("关闭", "Close"));
+  closeButton->setMinimumSize(ClientTheme::buttonSize(closeButton).expandedTo(QSize(88, 32)));
+  for (auto *button : appearance->findChildren<QPushButton *>())
+    button->setMinimumSize(ClientTheme::buttonSize(button));
   auto *cardScroll = findChild<QScrollArea *>("applicationCardScroll");
   const int scrollValue = cardScroll->verticalScrollBar()->value();
   reloadApplications();

@@ -40,5 +40,6 @@ Colors colors();
 QIcon icon(const QString &name);
 QRect dialogAvailableGeometry(const QWidget *dialog, bool initialPlacement);
 void positionDialog(QWidget *dialog, bool initialPlacement, int verticalOffset = 24);
+QSize buttonSize(QAbstractButton *button, bool compact = false);
 void apply();
 } // namespace ClientTheme

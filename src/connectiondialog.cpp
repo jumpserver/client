@@ -273,6 +273,8 @@ ConnectionDialog::ConnectionDialog(
   m_buttons->button(QDialogButtonBox::Ok)->setMinimumWidth(88);
   m_buttons->button(QDialogButtonBox::Cancel)->setMinimumWidth(88);
   m_buttons->button(QDialogButtonBox::Cancel)->setProperty("quiet", true);
+  for (auto *button : m_buttons->buttons())
+    button->setMinimumSize(ClientTheme::buttonSize(button).expandedTo(QSize(88, 32)));
   setTabOrder(m_protocol, m_methodTabs);
   setTabOrder(m_methodTabs, m_account);
   setTabOrder(m_account, m_username);

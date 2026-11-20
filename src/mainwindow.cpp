@@ -27,6 +27,9 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
+#include <QStylePainter>
+#include <QStyleOptionButton>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QResizeEvent>
@@ -48,6 +51,53 @@
 #include <utility>
 using ClientTheme::text;
 namespace {
+class SiteSwitcherButton : public QPushButton {
+public:
+  using QPushButton::QPushButton;
+protected:
+  void paintEvent(QPaintEvent *event) override {
+#ifdef Q_OS_LINUX
+    Q_UNUSED(event);
+    QStylePainter painter(this);
+    QStyleOptionButton option;
+    initStyleOption(&option);
+    const QString label = option.text;
+    const QIcon glyph = option.icon;
+    option.text.clear();
+    option.icon = QIcon();
+    painter.drawControl(QStyle::CE_PushButton, option);
+
+    const QRect content = style()->subElementRect(QStyle::SE_PushButtonContents, &option, this);
+    // Font line boxes include descent/leading that can offset visible CJK glyphs.
+    QPainterPath textPath;
+    textPath.addText(QPointF(), font(), label);
+    const QRectF ink = textPath.boundingRect();
+    const qreal gap = 6;
+    const qreal groupWidth = option.iconSize.width() + gap + option.fontMetrics.size(Qt::TextSingleLine, label).width();
+    qreal x = content.x() + (content.width() - groupWidth) / 2.0;
+    qreal centerY = content.y() + content.height() / 2.0;
+    if (option.state & QStyle::State_Sunken) {
+      x += style()->pixelMetric(QStyle::PM_ButtonShiftHorizontal, &option, this);
+      centerY += style()->pixelMetric(QStyle::PM_ButtonShiftVertical, &option, this);
+    }
+    const bool rtl = option.direction == Qt::RightToLeft;
+    const qreal iconX = rtl ? x + groupWidth - option.iconSize.width() : x;
+    const QRect iconRect(qRound(iconX), qRound(centerY - option.iconSize.height() / 2.0),
+                         option.iconSize.width(), option.iconSize.height());
+    glyph.paint(&painter, iconRect, Qt::AlignCenter,
+                isEnabled() ? QIcon::Normal : QIcon::Disabled);
+    const qreal textX = rtl ? x : x + option.iconSize.width() + gap;
+    const QPointF baseline(textX, centerY - ink.center().y());
+    painter.setFont(font());
+    painter.setPen(option.palette.color(isEnabled() ? QPalette::Active : QPalette::Disabled,
+                                       QPalette::ButtonText));
+    painter.drawText(baseline, label);
+#else
+    QPushButton::paintEvent(event);
+#endif
+  }
+};
+
 class ApprovalDialog : public QDialog {
 public:
   using QDialog::QDialog;
@@ -823,7 +873,7 @@ void MainWindow::buildUi() {
     refresh(true);
   });
   top->addStretch();
-  m_switcher = new QPushButton;
+  m_switcher = new SiteSwitcherButton;
   m_switcher->setObjectName("siteSwitcher");
   m_switcher->setProperty("quiet", true);
   m_switcher->setIcon(ClientTheme::icon("globe"));
@@ -1155,6 +1205,8 @@ void MainWindow::retranslateUi() {
   m_loginHint->setText(text("使用默认浏览器完成登录", "Continue securely in your default browser"));
   m_reopen->setText(text("重新打开浏览器", "Reopen browser"));
   m_copyLogin->setText(text("复制登录链接", "Copy sign-in link"));
+  for (auto *button : {m_switcher, m_loginButton, m_cancelLogin, m_reopen, m_copyLogin, m_cancelRestore})
+    button->setMinimumSize(ClientTheme::buttonSize(button));
   m_catalogLabel->setText(text("资源目录", "RESOURCES"));
   const auto labels = categoryLabels();
   for (int i = 0; i < labels.size(); ++i) {
@@ -1334,8 +1386,7 @@ void MainWindow::renderAssets() {
     auto *connectButton = new QPushButton(text("连接", "Connect"), m_table);
     connectButton->setEnabled(asset.value("is_active").toBool(true));
     connectButton->setProperty("soft", true);
-    connectButton->ensurePolished();
-    const QSize buttonSize = connectButton->sizeHint().expandedTo(QSize(64, 30));
+    const QSize buttonSize = ClientTheme::buttonSize(connectButton, true);
     connectButton->setFixedSize(buttonSize);
     m_table->setRowHeight(row, qMax(48, qMax(buttonSize.height() + 16, m_table->fontMetrics().height() + 20)));
     auto *actionCell = new QWidget;
@@ -1367,6 +1418,7 @@ void MainWindow::updateSelectionUi() {
   m_connectButton->setEnabled(m_service->authenticated() && selected > 0 &&
                               !m_connectionInFlight && m_pendingAsset.isEmpty());
   m_connectButton->setText(text("连接所选 (%1)", "Connect selected (%1)").arg(selected));
+  m_connectButton->setMinimumSize(ClientTheme::buttonSize(m_connectButton));
 }
 QJsonObject MainWindow::selectedAsset(bool grid) const {
   if (grid) {

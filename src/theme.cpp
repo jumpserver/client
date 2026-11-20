@@ -310,6 +310,18 @@ QString text(const char *zh, const char *en) {
 }
 Colors colors() { return paletteColors(qApp->palette().color(QPalette::Window).lightness() < 128); }
 QIcon icon(const QString &name) { return QIcon(new LineIconEngine(name)); }
+QSize buttonSize(QAbstractButton *button, bool compact) {
+  button->ensurePolished();
+  const QFontMetrics metrics(button->font());
+  int width = metrics.size(Qt::TextShowMnemonic, button->text()).width();
+  int height = metrics.height();
+  if (!button->icon().isNull()) {
+    width += button->iconSize().width() + (button->text().isEmpty() ? 0 : 6);
+    height = qMax(height, button->iconSize().height());
+  }
+  return {qMax(compact ? 64 : 72, width + (compact ? 22 : 26)),
+          qMax(compact ? 30 : 32, height + (compact ? 10 : 14))};
+}
 void apply() {
   auto *observer = paletteObserver();
   if (observer->applying) return;
@@ -378,24 +390,35 @@ QSpinBox::up-button, QSpinBox::down-button { border: none; background: transpare
 QSpinBox::up-arrow { image: url(:/ui/chevron-up.svg); width: 10px; height: 10px; }
 QSpinBox::down-arrow { image: url(:/ui/chevron-down.svg); width: 10px; height: 10px; }
 QPushButton, QToolButton { background: @panel@; color: @text@; border: 1px solid @border@; border-radius: 7px; padding: 6px 12px; min-height: 18px; }
-QPushButton:hover, QToolButton:hover { background: @hover@; }
-QPushButton:pressed, QToolButton:pressed { background: @selected@; }
-QPushButton:focus, QToolButton:focus { border-color: @accent@; }
-QPushButton:disabled, QToolButton:disabled { color: @muted@; border-color: @border@; }
+QPushButton:hover:enabled, QToolButton:hover:enabled { background: @hover@; }
+QPushButton:checked, QToolButton:checked, QPushButton:pressed:enabled, QToolButton:pressed:enabled { background: @selected@; }
+QPushButton:focus:enabled, QToolButton:focus:enabled { border-color: @accent@; }
+QPushButton:disabled, QToolButton:disabled { background: @panel@; color: @muted@; border-color: @border@; }
 QPushButton[primary=true] { background: @accent@; color: white; border: 1px solid @accent@; font-weight: 600; }
-QPushButton[primary=true]:hover { background: @accentHover@; border-color: @accentHover@; }
+QPushButton[primary=true]:hover:enabled { background: @accentHover@; border-color: @accentHover@; }
+QPushButton[primary=true]:pressed:enabled { background: @accentPressed@; border-color: @accentPressed@; }
+QPushButton[primary=true]:focus:enabled { border-color: @focusBorder@; }
 QPushButton[primary=true]:disabled { background: @selected@; color: @muted@; border-color: transparent; }
 QPushButton[quiet=true], QToolButton[quiet=true] { background: transparent; border: 1px solid transparent; }
-QPushButton[quiet=true]:hover, QToolButton[quiet=true]:hover { background: @hover@; }
+QPushButton[quiet=true]:hover:enabled, QToolButton[quiet=true]:hover:enabled { background: @hover@; }
+QPushButton[quiet=true]:checked, QToolButton[quiet=true]:checked, QPushButton[quiet=true]:pressed:enabled, QToolButton[quiet=true]:pressed:enabled { background: @selected@; }
+QPushButton[quiet=true]:focus:enabled, QToolButton[quiet=true]:focus:enabled { border-color: @accent@; }
+QPushButton[quiet=true]:disabled, QToolButton[quiet=true]:disabled { background: transparent; color: @muted@; border-color: transparent; }
 QPushButton[soft=true], QPushButton[selected=true] { color: @accent@; background: @softAccent@; border: 1px solid transparent; font-weight: 600; }
-QPushButton[soft=true]:hover { background: @softHover@; }
-QPushButton[soft=true]:disabled { color: @muted@; background: @background@; }
-QPushButton[iconOnly=true] { padding: 6px; min-width: 18px; min-height: 18px; }
+QPushButton[soft=true]:hover:enabled, QPushButton[selected=true]:hover:enabled { background: @softHover@; }
+QPushButton[soft=true]:pressed:enabled, QPushButton[selected=true]:pressed:enabled { background: @softPressed@; }
+QPushButton[soft=true]:focus:enabled, QPushButton[selected=true]:focus:enabled { border-color: @accent@; }
+QPushButton[soft=true]:disabled, QPushButton[selected=true]:disabled { color: @muted@; background: @background@; border-color: transparent; }
+QPushButton[iconOnly=true], QToolButton[iconOnly=true] { padding: 0; min-width: 0; min-height: 0; }
+QPushButton#avatar { padding: 0; }
 QFrame#settingsProtocolColumn { background: transparent; border: none; border-right: 1px solid @border@; }
 QLabel[role=groupLabel] { color: @muted@; font-size: 11px; font-weight: 600; padding: 4px 8px; }
 QPushButton[role=protocolRow] { background: transparent; border: 1px solid transparent; color: @text@; text-align: left; padding: 5px 10px; border-radius: 7px; min-height: 16px; }
-QPushButton[role=protocolRow]:hover { background: @hover@; }
+QPushButton[role=protocolRow]:hover:enabled { background: @hover@; }
 QPushButton[role=protocolRow]:checked { background: @selected@; color: @accent@; font-weight: 600; }
+QPushButton[role=protocolRow]:pressed:enabled { background: @softPressed@; }
+QPushButton[role=protocolRow]:focus:enabled { border-color: @accent@; }
+QPushButton[role=protocolRow]:disabled { background: transparent; color: @muted@; border-color: transparent; }
 QFrame#appCard { background: @panel@; border: 1px solid @border@; border-radius: 10px; }
 QFrame#appCard:hover { border-color: @muted@; }
 QLabel[role=appIcon] { background: @background@; border: 1px solid @border@; border-radius: 8px; }
@@ -458,10 +481,17 @@ QToolTip { color: @text@; background: @panel@; border: 1px solid @border@; borde
 QStatusBar { color: @muted@; background: @background@; border: none; font-size: 12px; }
 QStatusBar::item { border: none; }
 )CSS");
+#ifdef Q_OS_LINUX
+  // Standard dialog buttons otherwise inherit icons from the desktop theme.
+  sheet += QStringLiteral("\nQDialogButtonBox { dialogbuttonbox-buttons-have-icons: 0; }\n");
+#endif
   const QList<QPair<QString, QColor>> values{
     {"background", c.background}, {"panel", c.panel}, {"sidebar", c.sidebar},
     {"text", c.text}, {"muted", c.muted}, {"border", c.border},
     {"hover", c.hover}, {"selected", c.selected}, {"accentHover", c.accent.darker(108)},
+    {"accentPressed", c.accent.darker(118)},
+    {"focusBorder", blend(c.accent, c.text, 0.45)},
+    {"softPressed", blend(c.panel, c.accent, dark ? 0.30 : 0.24)},
     {"tableDivider", blend(c.panel, c.border, 0.6)},
     {"searchBackground", blend(c.sidebar, c.panel, 0.65)},
     {"accent", c.accent}, {"softAccent", c.softAccent},
