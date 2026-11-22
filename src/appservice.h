@@ -124,6 +124,4 @@ private:
                  const QByteArray &body, const QByteArray &contentType, bool authenticated, Result result);
     void api(const QByteArray &method, const QString &path, const QUrlQuery &query,
              QJsonObject body, Result result, bool retried = false);
-    void fetchAssetType(QUrlQuery query, int offset, QJsonArray items, quint64 requestId,
-                        std::function<void(QJsonArray, QString)> done);
 };

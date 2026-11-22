@@ -1,6 +1,7 @@
 #include "appservice.h"
 #include "mainwindow.h"
 #include "platform.h"
+#include "replay/localization.h"
 #include "theme.h"
 #ifdef Q_OS_MACOS
 #include "protocol_events.h"
@@ -67,6 +68,16 @@ public:
 
 int main(int argc, char **argv)
 {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    // The FFmpeg backend is not part of an offline player's shipped runtime.
+# if defined(Q_OS_MACOS)
+    qputenv("QT_MEDIA_BACKEND", "darwin");
+# elif defined(Q_OS_WIN)
+    qputenv("QT_MEDIA_BACKEND", "windows");
+# elif defined(Q_OS_LINUX)
+    qputenv("QT_MEDIA_BACKEND", "gstreamer");
+# endif
+#endif
 #if defined(Q_OS_LINUX)
     preferKylinPlatformTheme();
 #endif
@@ -86,6 +97,7 @@ int main(int argc, char **argv)
     QCoreApplication::setApplicationName("client");
     QApplication::setApplicationDisplayName("OSMClient");
     QCoreApplication::setApplicationVersion(CLIENT_QT_VERSION);
+    Replay::installTranslations();
 #ifndef Q_OS_MACOS
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/icon.png")));
 #endif
@@ -144,7 +156,7 @@ int main(int argc, char **argv)
     settings->setMenuRole(QAction::PreferencesRole);
     auto *about = appMenu->addAction(text("关于", "About"), &window, [&] {
         QMessageBox::about(&window, text("关于 OSMClient", "About OSMClient"),
-            QStringLiteral("OSMClient %1\nQt %2\nFIT2CLOUD").arg(CLIENT_QT_VERSION, qVersion()));
+            QStringLiteral("OSMClient %1\nQt %2").arg(CLIENT_QT_VERSION, qVersion()));
     });
     about->setMenuRole(QAction::AboutRole);
     appMenu->addSeparator();

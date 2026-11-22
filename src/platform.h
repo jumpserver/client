@@ -28,6 +28,9 @@ public:
                              bool excludeSimpleHostnames = false);
 };
 
+QList<QNetworkProxy> resolveClientProxies(const QUrl &url, const QString &mode,
+                                          const QString &address, QString *failure = nullptr);
+
 class ConfigStore : public QObject {
     Q_OBJECT
 public:
@@ -40,6 +43,8 @@ public:
     bool clearDefaultApplication(const QString &category, const QString &protocol);
     QString error() const { return error_; }
     static QString configPath();
+    static QString configDirectory();
+    static QString applicationDataName(const QString &displayName = {});
     static QString platformKey();
     static QJsonObject merge(const QJsonObject &user, const QJsonObject &defaults);
 signals:

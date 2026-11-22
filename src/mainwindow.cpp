@@ -1,4 +1,6 @@
 #include "mainwindow.h"
+#include "replay/replaywindow.h"
+#include "replay/transcodewindow.h"
 #include "appservice.h"
 #include "connectiondialog.h"
 #include "platform.h"
@@ -814,10 +816,34 @@ void MainWindow::buildUi() {
   avatar->setIconSize(QSize(32, 32));
   profileRow->addWidget(avatar);
   connect(avatar, &QPushButton::clicked, this, [this, avatar] {
-    if (!m_service->authenticated()) return;
+    if (m_restoring || !m_service->authenticated()) return;
     QMenu menu(this);
     menu.addAction(text("退出登录", "Sign out"), m_service, &AppService::logout);
     menu.exec(avatar->mapToGlobal(QPoint(0, 0)) - QPoint(0, menu.sizeHint().height()));
+  });
+  avatar->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(avatar, &QWidget::customContextMenuRequested, this, [this, avatar](const QPoint &) {
+    QMenu menu(this);
+    menu.setObjectName("avatarContextMenu");
+    auto *play = menu.addAction(ClientTheme::icon("clapperboard"), text("离线播放", "Offline playback"));
+    play->setObjectName("avatarOfflinePlayback");
+    auto *transcode = menu.addAction(ClientTheme::icon("replay-transcode"), text("录像转码", "Recording transcoding"));
+    transcode->setObjectName("avatarReplayTranscode");
+    QAction *logout = nullptr;
+    if (!m_restoring && m_service->authenticated()) {
+      menu.addSeparator();
+      logout = menu.addAction(ClientTheme::icon("logout"), text("退出登录", "Sign out"));
+    }
+    menu.ensurePolished();
+    const auto available = ClientTheme::dialogAvailableGeometry(&menu, true);
+    const auto anchor = avatar->mapToGlobal(QPoint(0, 0));
+    const auto size = menu.sizeHint();
+    const int x = qBound(available.left(), anchor.x(), qMax(available.left(), available.right() - size.width() + 1));
+    const int y = qMax(available.top(), anchor.y() - size.height() - 6);
+    auto *selected = menu.exec(QPoint(x, y));
+    if (selected == play) showOfflineReplay();
+    else if (selected == transcode) showReplayTranscode();
+    else if (selected && selected == logout) m_service->logout();
   });
   m_profile = new QLabel;
   m_profile->setTextFormat(Qt::PlainText);
@@ -1195,9 +1221,6 @@ void MainWindow::retranslateUi() {
   m_restoreTitle->setText(text("正在恢复登录…", "Restoring your session…"));
   m_cancelRestore->setText(text("返回登录", "Back to sign in"));
   m_switcher->setText(text("切换站点", "Switch site"));
-  auto *avatar = findChild<QPushButton *>("avatar");
-  avatar->setToolTip(text("账户与站点", "Account and sites"));
-  avatar->setAccessibleName(avatar->toolTip());
   m_pageSize->setAccessibleName(text("每页条数", "Assets per page"));
   m_welcome->setText(text("欢迎使用 OSMClient", "Welcome to OSMClient"));
   m_loginSubtitle->setText(text("连接工作空间，安全访问你的授权资产", "Connect to your workspace and access your assets."));
@@ -1235,6 +1258,8 @@ void MainWindow::retranslateUi() {
     tool.first->setAccessibleName(tool.second);
   }
   m_layoutButton->setIcon(ClientTheme::icon(m_views->currentIndex() == 0 ? "list" : "grid"));
+  if (m_replayWindow) m_replayWindow->retranslate();
+  if (m_transcodeWindow) m_transcodeWindow->retranslate();
   m_loginButton->setText(text("浏览器登录", "Sign in with browser"));
   m_cancelLogin->setText(text("取消登录", "Cancel sign-in"));
   m_table->setHorizontalHeaderLabels(
@@ -1850,7 +1875,6 @@ void MainWindow::updateSessionUi() {
   else m_content->setCurrentIndex(active ? 1 : 0);
   m_switcher->setEnabled(!m_restoring);
   m_settingsButton->setEnabled(!m_restoring);
-  findChild<QPushButton *>("avatar")->setEnabled(!m_restoring);
   m_categories->setEnabled(active);
   m_search->setEnabled(active);
   m_refreshButton->setEnabled(active && !m_loading);
@@ -1869,8 +1893,9 @@ void MainWindow::updateSessionUi() {
                             : text("尚未登录", "Not signed in"));
   m_profile->setToolTip(m_profile->text());
   auto *avatar = findChild<QPushButton *>("avatar");
-  avatar->setToolTip(active ? m_profile->text() : text("账户与站点", "Account and sites"));
-  avatar->setAccessibleName(avatar->toolTip());
+  avatar->setAccessibleName(active ? m_profile->text() : text("账户与站点", "Account and sites"));
+  avatar->setToolTip(avatar->accessibleName().toHtmlEscaped().replace('\n', "<br>") +
+      "<br>" + text("右击打开录像工具", "Right-click for recording tools"));
 }
 void MainWindow::updateLoginState() {
   const bool pending = m_service->loginPending();
@@ -1905,7 +1930,35 @@ void MainWindow::showError(const QString &message, bool statusOnly) {
   m_visibleErrors.remove(message);
 }
 void MainWindow::showSettings() {
+  openSettings(false);
+}
+void MainWindow::showOfflineReplay(const QString &path) {
+  // Qt 5.11 multimedia widgets can keep a stale native surface after a
+  // hidden dialog is shown again. Recreate the lightweight player window on
+  // reopen so its stacked canvas/video surface is always freshly laid out.
+  if (m_replayWindow && !m_replayWindow->isVisible()) {
+    delete m_replayWindow;
+    m_replayWindow = nullptr;
+  }
+  if (!m_replayWindow) m_replayWindow = new Replay::Window(this);
+  if (!path.isEmpty()) m_replayWindow->openFiles({path});
+  m_replayWindow->showNormal();
+  m_replayWindow->raise();
+  m_replayWindow->activateWindow();
+}
+void MainWindow::showReplayTranscode() {
+  if (!m_transcodeWindow) {
+    m_transcodeWindow = new Replay::TranscodeWindow(this, [this] { openSettings(true); },
+        [this](const QString &path) { showOfflineReplay(path); });
+  }
+  m_transcodeWindow->retranslate();
+  m_transcodeWindow->showNormal();
+  m_transcodeWindow->raise();
+  m_transcodeWindow->activateWindow();
+}
+void MainWindow::openSettings(bool replayPlugin) {
   SettingsDialog dialog(m_config, m_version, this);
+  if (replayPlugin) dialog.selectReplayPlugin();
   connect(&dialog, &SettingsDialog::preferencesChanged, this, [this] {
     ClientTheme::apply();
     retranslateUi();
@@ -1913,6 +1966,7 @@ void MainWindow::showSettings() {
     emit preferencesChanged();
   });
   dialog.exec();
+  if (m_transcodeWindow) m_transcodeWindow->retranslate();
 }
 void MainWindow::handleUrl(const QString &rawUrl) {
   if (!rawUrl.startsWith("jms://", Qt::CaseInsensitive))

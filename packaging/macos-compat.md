@@ -18,7 +18,7 @@ python3 scripts/package-macos.py --build build-arm64 \
   --macdeployqt /tmp/osm-qt-arm64/bin/macdeployqt \
   --output dist/arm64/OSMClient.app --deployment-target 11.0
 python3 scripts/package-dmg.py --app dist/arm64/OSMClient.app \
-  --output dist/OSMClient-4.1.2-macos-arm64.dmg --deployment-target 11.0
+  --output dist/OSMClient-4.1.4-macos-arm64.dmg --deployment-target 11.0
 ```
 
 ## Apple Silicon 交叉构建 Intel
@@ -40,11 +40,17 @@ python3 scripts/package-macos.py --build build-x86_64 \
   --plugins-dir /tmp/osm-qt-x86_64/plugins --libpath /tmp/osm-qt-x86_64/lib \
   --output dist/x86_64/OSMClient.app --deployment-target 10.15 --skip-smoke
 python3 scripts/package-dmg.py --app dist/x86_64/OSMClient.app \
-  --output dist/OSMClient-4.1.2-macos-x86_64.dmg \
+  --output dist/OSMClient-4.1.4-macos-x86_64.dmg \
   --deployment-target 10.15 --skip-smoke
 ```
 
 `--plugins-dir` 指定目标架构插件，并使用脚本自身的递归 Mach-O 依赖收集器；该路径不调用 macdeployqt，避免它从宿主 Qt 前缀混入 arm64 框架。`--macdeployqt` 参数为统一命令接口保留。没有 Rosetta 时，Intel 包无法在 ARM 主机启动，显式 `--skip-smoke` 将这一限制写入 manifest；原生 CI 不跳过启动检查。
+
+打包脚本始终只收集播放器实际使用的 Qt 运行插件：Cocoa
+平台、macOS 样式、JPEG/WebP/SVG 图像格式、SVG 图标引擎、AVFoundation
+媒体播放和 CoreAudio。递归依赖收集完成后会删除 Qt 开发头文件、静态库和
+`.prl` 文件；DMG 使用 LZMA（`ULMO`）压缩，避免将 QML、3D、位置服务、
+虚拟键盘和调试插件打入安装包。
 
 ## 包验证与签名
 

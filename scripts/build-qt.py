@@ -19,6 +19,8 @@ VERSION = "5.15.19"
 SOURCES = {
     "qtbase": "51e91c73abacab81e64efd01bf95794e79c0e605ad80947a024769f0dd620a32",
     "qtsvg": "cabc95fc12fa84c92e95f08660742a0ce297e6db3deadbefbe7fbec4769b8c13",
+    "qtmultimedia": "dbfa442dff7d8204b23fbfa71389bdcc92fbc9f84036d5220d9c9fdbf9a5fb35",
+    "qtimageformats": "e7535711cb638a90da172dfb926ff57f37478b6591a4199089876708d89cb45e",
     "qttools": "2694af886130d63b8a42bcd138f4035fd8108273ebd16781f87300da352f1aa6",
 }
 JOM_SHA256 = "d533c1ef49214229681e90196ed2094691e8c4a0a0bef0b2c901debcb562682b"
@@ -101,7 +103,10 @@ def main():
     deploy_name = "macdeployqt" if system == "Darwin" else "windeployqt.exe"
     required = [(host or prefix / "bin") / ("qmake" + suffix), (host or prefix / "bin") / deploy_name,
                 prefix / "lib/cmake/Qt5Svg/Qt5SvgConfig.cmake",
-                prefix / "lib/cmake/Qt5Test/Qt5TestConfig.cmake"]
+                prefix / "lib/cmake/Qt5Test/Qt5TestConfig.cmake",
+                prefix / "lib/cmake/Qt5MultimediaWidgets/Qt5MultimediaWidgetsConfig.cmake",
+                prefix / "plugins/imageformats" / ("libqwebp.dylib" if system == "Darwin" else "qwebp.dll"),
+                prefix / "plugins/mediaservice" / ("libqavfmediaplayer.dylib" if system == "Darwin" else "wmfengine.dll")]
     if marker.is_file() and json.loads(marker.read_text()) == expected and all(p.is_file() for p in required):
         print(f"Using verified Qt {VERSION} toolchain cache at {prefix}")
         return
@@ -150,7 +155,7 @@ def main():
     run(command, cwd=base_build, env=env)
     run(make, cwd=base_build, env=env)
     run(make + ["install"], cwd=base_build, env=env)
-    for module in ["qtsvg", "qttools"]:
+    for module in ["qtsvg", "qtmultimedia", "qtimageformats", "qttools"]:
         if host and module == "qttools":
             continue # Deployment tools run on the host, not the target CPU.
         build = work / ("build-" + module)
@@ -163,6 +168,8 @@ def main():
                         "makeqpf", "pixeltool", "qdbus", "qev", "qtattributionsscanner", "qtdiag",
                         "qtpaths", "qtplugininfo", "qdoc"]
             command += ["--"] + ["-no-feature-" + name for name in disabled]
+        elif module == "qtimageformats":
+            command += ["--", "-qt-webp", "-no-tiff", "-no-jasper", "-no-mng"]
         run(command, cwd=build, env=env)
         run(make, cwd=build, env=env)
         run(make + ["install"], cwd=build, env=env)

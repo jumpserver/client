@@ -13,6 +13,7 @@
 - SSH、Telnet、SFTP、RDP、VNC、数据库和 Web 应用连接沿用 Go 启动器；实际支持的客户端受原项目各系统实现及本机安装情况约束。
 - 字符集、退格键、RDP 分辨率/全屏/多屏/磁盘映射、主题、字体、主题色、中英文、本地应用选择、版本信息、托盘和单实例。
 - macOS/Windows/Linux 的 `jms://` 注册模板与平台凭据存储。
+- 右击头像可打开[离线播放或录像转码](docs/offline-replay.md)，无需登录；RDP/VNC 协议录像转码所用的 FFmpeg 在设置中手动下载。
 
 功能映射和差异见 [迁移说明](docs/migration.md)，系统/架构规划见 [兼容性矩阵](docs/compatibility.md)。
 
@@ -28,7 +29,7 @@
 
 ## 构建
 
-需要 CMake ≥ 3.16、C++17 编译器、Qt Core/Gui/Widgets/Network/Svg/Test、Python ≥ 3.8 和 Go。Go 模块版本保持原项目，构建工具链应按目标系统选择。
+需要 CMake ≥ 3.16、C++17 编译器、Qt Core/Gui/Widgets/Network/Svg/Test/Multimedia/MultimediaWidgets、zlib 开发库、Python ≥ 3.8 和 Go。Qt 运行环境还须提供 WebP 图像插件和系统媒体后端。Go 模块版本保持原项目，构建工具链应按目标系统选择。
 
 推荐使用 `./build.sh` 生成安装包。当前 Apple Silicon 开发机的兼容 Qt 和 Go 路径如下（`/tmp` 可能被系统清理）：
 
@@ -54,7 +55,7 @@ cmake --build build-qt6 --parallel
 
 本机 Homebrew Qt 5 路径为 `/opt/homebrew/opt/qt@5`。分拆安装的 Homebrew Qt 6 可显式传入 `-DQt6_DIR=/opt/homebrew/lib/cmake/Qt6 -DQt6Svg_DIR=/opt/homebrew/lib/cmake/Qt6Svg -DCMAKE_PREFIX_PATH=/opt/homebrew`。不要在同一个构建目录切换 Qt 主版本。
 
-Linux 安装对应发行版的 Qt 5 开发包、QtSvg、编译工具和 `libsecret-1-dev`（RPM 系通常为 `libsecret-devel`）。缺少 libsecret 时仍可使用当前登录会话，但不能持久保存凭据。桌面环境还须提供可用且已解锁的 Secret Service。
+Linux 安装对应发行版的 Qt 5 开发包、QtSvg、Qt Multimedia、zlib、编译工具和 `libsecret-1-dev`（RPM 系通常为 `libsecret-devel`）。缺少 libsecret 时仍可使用当前登录会话，但不能持久保存凭据。桌面环境还须提供可用且已解锁的 Secret Service。Windows 本地构建需提供与编译器和目标架构匹配的静态 zlib（`ZLIB_ROOT`）。
 
 构建选项：
 
@@ -73,7 +74,7 @@ Linux 安装对应发行版的 Qt 5 开发包、QtSvg、编译工具和 `libsecr
 
 安装包需先注册 `jms://`，才能从浏览器回到客户端。设置菜单与原 client 对齐，不再提供“高级”入口；既有本地回调的内部兼容能力保留。不要将账户密码或 token 写进命令行、源码或配置示例。
 
-Qt 的界面设置存于 `FIT2CLOUD/client` 的平台设置位置。Go 应用配置继续使用原 `jumpserver-client/config.json`，设置页的应用选择会同步影响使用同一配置的原客户端。配置合并保留已有应用路径/偏好，损坏的配置报错且不覆盖。
+Qt 的界面设置存于 `FIT2CLOUD/client` 的平台设置位置。Qt 客户端与 Go 协议启动器共用由应用显示名生成的数据目录，`OSMClient` 使用 `osm-client/config.json`；设置页的应用选择会同步影响同一配置。配置合并保留已有应用路径/偏好，损坏的配置报错且不覆盖。旧 `jumpserver-client` 目录不会自动迁移。
 
 界面、系统应用显示名与安装器统一为 `OSMClient`。源码目录仍为 `client-qt`，构建目标、安装路径、安装文件名及配置/凭据命名空间统一为 `client`；旧 `client-qt` 命名空间不会自动迁移。
 

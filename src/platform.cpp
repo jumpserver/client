@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -13,6 +14,7 @@
 #include <QLocalSocket>
 #include <QLockFile>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QSysInfo>
@@ -277,6 +279,23 @@ QList<QNetworkProxy> SystemProxy::resolve(const QUrl &url, QString *failure)
 #endif
 }
 
+QList<QNetworkProxy> resolveClientProxies(const QUrl &url, const QString &mode,
+                                          const QString &address, QString *failure) {
+    if (failure) failure->clear();
+    if (mode == "system") return SystemProxy::resolve(url, failure);
+    if (mode == "manual") {
+        const QUrl proxy(address.contains("://") ? address : "http://" + address);
+        if (!proxy.isValid() || proxy.scheme() != "http" || proxy.host().isEmpty() ||
+            !proxy.userInfo().isEmpty() || proxy.port(8080) <= 0 ||
+            (proxy.path() != "" && proxy.path() != "/") || proxy.hasQuery() || proxy.hasFragment()) {
+            if (failure) *failure = QObject::tr("代理地址无效，请填写 HTTP 代理主机和端口");
+            return {};
+        }
+        return {QNetworkProxy(QNetworkProxy::HttpProxy, proxy.host(), quint16(proxy.port(8080)))};
+    }
+    return {QNetworkProxy(QNetworkProxy::NoProxy)};
+}
+
 QByteArray CredentialStore::read(const QString &key, QString *error) {
     setError(error, {});
 #ifdef Q_OS_MACOS
@@ -395,6 +414,24 @@ QString ConfigStore::platformKey() {
     return QStringLiteral("linux");
 #endif
 }
+QString ConfigStore::applicationDataName(const QString &displayName) {
+    QString name = displayName.trimmed();
+    if (name.isEmpty() && qGuiApp) name = qGuiApp->applicationDisplayName().trimmed();
+    if (name.isEmpty() && QCoreApplication::instance())
+        name = QCoreApplication::applicationName().trimmed();
+    if (name.isEmpty()) return QStringLiteral("client");
+
+    QString slug = name.toCaseFolded();
+    slug.replace(QRegularExpression(QStringLiteral("[^\\p{L}\\p{N}]+")), QStringLiteral("-"));
+    while (slug.startsWith('-')) slug.remove(0, 1);
+    while (slug.endsWith('-')) slug.chop(1);
+    QString compact;
+    for (const auto &character : slug)
+        if (character != '-') compact += character;
+    // Product display names can change without changing the stable data path.
+    if (compact == QLatin1String("osmclient")) return QStringLiteral("osm-client");
+    return slug.isEmpty() ? QStringLiteral("client") : slug;
+}
 QString ConfigStore::configPath() {
 #ifdef Q_OS_MACOS
     const QString root = QDir::homePath() + QStringLiteral("/Library/Application Support");
@@ -403,7 +440,10 @@ QString ConfigStore::configPath() {
 #else
     const QString root = qEnvironmentVariable("XDG_CONFIG_HOME", QDir::homePath() + QStringLiteral("/.config"));
 #endif
-    return QDir(root).filePath(QStringLiteral("jumpserver-client/config.json"));
+    return QDir(root).filePath(applicationDataName() + QStringLiteral("/config.json"));
+}
+QString ConfigStore::configDirectory() {
+    return QFileInfo(configPath()).absolutePath();
 }
 QJsonObject ConfigStore::merge(const QJsonObject &user, const QJsonObject &defaults) {
     QJsonObject result = defaults;
@@ -573,6 +613,9 @@ void Launcher::launch(const QString &url) {
     auto process = new QProcess(this);
     process->setProgram(executable);
     process->setArguments({url});
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("CLIENT_APP_DATA_NAME"), ConfigStore::applicationDataName());
+    process->setProcessEnvironment(environment);
     process->setWorkingDirectory(QFileInfo(executable).absolutePath());
     process->setProcessChannelMode(QProcess::SeparateChannels);
     auto reported = std::make_shared<bool>(false);

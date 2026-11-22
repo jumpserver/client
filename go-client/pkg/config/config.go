@@ -3,8 +3,8 @@ package config
 import (
 	"encoding/json"
 	"go-client/global"
+	"go-client/pkg/appdata"
 	"os"
-	"path/filepath"
 )
 
 type AppConfig struct {
@@ -76,8 +76,7 @@ func GetConf() AppConfig {
 var GlobalConfig *AppConfig
 
 func getDefaultConfig() AppConfig {
-	dir, _ := os.UserConfigDir()
-	filePath := filepath.Join(dir, "jumpserver-client", "config.json")
+	filePath, _ := appdata.Directory("config.json")
 	jsonFile, err := os.Open(filePath)
 	if err != nil {
 		global.LOG.Error(err.Error())

@@ -14,11 +14,62 @@ import sys
 import tempfile
 import uuid
 import xml.etree.ElementTree as ET
+from replay_payload import without_ffmpeg
 
 ROOT = Path(__file__).resolve().parents[1]
 MACHINES = {'amd64': 0x8664, '386': 0x14c}
 WIX_NS = 'http://schemas.microsoft.com/wix/2006/wi'
 GUID_NAMESPACE = uuid.UUID('b04c93d4-f237-499e-b98b-80e56d403d37')
+WINDOWS_QT_RUNTIME_PLUGINS = {
+    5: (
+        'platforms/qwindows.dll',
+        'styles/qwindowsvistastyle.dll',
+        'imageformats/qjpeg.dll',
+        'imageformats/qwebp.dll',
+        'imageformats/qsvg.dll',
+        'iconengines/qsvgicon.dll',
+        'mediaservice/wmfengine.dll',
+        'audio/qtaudio_windows.dll',
+        'bearer/qgenericbearer.dll',
+        'bearer/qnativewifibearer.dll',
+        'bearer/qnetworklistmanager.dll',
+        'tls/qschannelbackend.dll',
+        'tls/qopensslbackend.dll',
+    ),
+    6: (
+        'platforms/qwindows.dll',
+        'styles/qmodernwindowsstyle.dll',
+        'styles/qwindowsvistastyle.dll',
+        'imageformats/qjpeg.dll',
+        'imageformats/qwebp.dll',
+        'imageformats/qsvg.dll',
+        'iconengines/qsvgicon.dll',
+        'multimedia/windowsmediaplugin.dll',
+        'networkinformation/qnetworklistmanager.dll',
+        'tls/qschannelbackend.dll',
+        'tls/qopensslbackend.dll',
+    ),
+}
+WINDOWS_QT_REQUIRED_PLUGINS = {
+    5: (
+        'platforms/qwindows.dll',
+        'imageformats/qjpeg.dll',
+        'imageformats/qwebp.dll',
+        'imageformats/qsvg.dll',
+        'iconengines/qsvgicon.dll',
+        'mediaservice/wmfengine.dll',
+        'audio/qtaudio_windows.dll',
+    ),
+    6: (
+        'platforms/qwindows.dll',
+        'imageformats/qjpeg.dll',
+        'imageformats/qwebp.dll',
+        'imageformats/qsvg.dll',
+        'iconengines/qsvgicon.dll',
+        'multimedia/windowsmediaplugin.dll',
+        'networkinformation/qnetworklistmanager.dll',
+    ),
+}
 
 
 def run(command, label, env=None, quiet=False):
@@ -58,12 +109,91 @@ def deployment_major(cache):
 
 
 def windeployqt_options(deployqt, qt_major):
-    options = ['--release', '--compiler-runtime']
+    options = ['--release', '--compiler-runtime', '--no-translations']
     qt_bin = Path(deployqt).parent
     angle_library = ((qt_bin / 'libGLESv2.dll').is_file() and (qt_bin / 'libEGL.dll').is_file()) or (qt_bin / 'QtANGLE.dll').is_file()
     if qt_major == 5 and not angle_library:
         options += ['--no-angle', '--no-opengl-sw']
     return options
+
+
+def prune_windows_qt_plugins(source, destination, major):
+    """Keep only plugins used by the GUI, media playback and system proxy."""
+    source = Path(source)
+    destination = Path(destination)
+    allowed = set(WINDOWS_QT_RUNTIME_PLUGINS.get(major, ()))
+    if not allowed:
+        raise RuntimeError(f'Unsupported Qt major version for Windows packaging: {major}')
+    if not source.is_dir():
+        raise RuntimeError(f'Qt plugin directory is missing: {source}')
+    for category in sorted(path for path in source.iterdir() if path.is_dir()):
+        target = destination / category.name
+        if not target.is_dir():
+            continue
+        files = sorted((path for path in target.rglob('*')
+                        if path.is_file() or path.is_symlink()),
+                       key=lambda path: len(path.parts), reverse=True)
+        for path in files:
+            relative = (Path(category.name) / path.relative_to(target)).as_posix()
+            if relative not in allowed:
+                path.unlink()
+        directories = sorted((path for path in target.rglob('*') if path.is_dir()),
+                             key=lambda path: len(path.parts), reverse=True)
+        for path in directories:
+            if not any(path.iterdir()):
+                path.rmdir()
+        if target.is_dir() and not any(target.iterdir()):
+            target.rmdir()
+
+
+def deploy_windows_qt_plugins(source, destination, major):
+    """Copy an allowlisted plugin if windeployqt did not detect a dynamic use."""
+    allowed = WINDOWS_QT_RUNTIME_PLUGINS.get(major)
+    if allowed is None:
+        raise RuntimeError(f'Unsupported Qt major version for Windows packaging: {major}')
+    source = Path(source)
+    destination = Path(destination)
+    for relative in allowed:
+        plugin = source / relative
+        if not plugin.is_file():
+            continue
+        target = destination / relative
+        if not target.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(plugin, target)
+
+
+def remove_qt_translations(stage):
+    """The application ships its own strings and never loads Qt .qm catalogs."""
+    translations = stage / 'translations'
+    if translations.exists():
+        shutil.rmtree(translations)
+    for path in stage.rglob('*.qm'):
+        path.unlink()
+
+
+def validate_windows_qt_plugins(source, stage, major, native_tls=False):
+    required = WINDOWS_QT_REQUIRED_PLUGINS.get(major)
+    allowed = set(WINDOWS_QT_RUNTIME_PLUGINS.get(major, ()))
+    if required is None or not allowed:
+        raise RuntimeError(f'Unsupported Qt major version for Windows packaging: {major}')
+    source = Path(source)
+    for relative in required:
+        if not (stage / Path(relative)).is_file():
+            raise RuntimeError(f'Required Windows Qt plugin is missing: {relative}')
+    if major == 6:
+        tls = 'tls/qschannelbackend.dll' if native_tls else 'tls/qopensslbackend.dll'
+        if not (stage / tls).is_file():
+            raise RuntimeError(f'Required Windows Qt TLS plugin is missing: {tls}')
+    for category in sorted(path for path in source.iterdir() if path.is_dir()):
+        target = stage / category.name
+        if not target.is_dir():
+            continue
+        for path in target.rglob('*'):
+            if path.is_file() or path.is_symlink():
+                relative = (Path(category.name) / path.relative_to(target)).as_posix()
+                if relative not in allowed:
+                    raise RuntimeError(f'Unexpected Windows Qt plugin in payload: {relative}')
 
 
 def package_version(cache):
@@ -109,7 +239,7 @@ def validate_payload(stage, arch, native_tls=False):
     qt_versions = [major for major in (5, 6) if (stage / f'Qt{major}Core.dll').is_file()]
     if len(qt_versions) != 1:
         raise RuntimeError('Payload must contain exactly one Qt major version')
-    for module in ('Core', 'Gui', 'Widgets', 'Network', 'Svg'):
+    for module in ('Core', 'Gui', 'Widgets', 'Network', 'Svg', 'Multimedia', 'MultimediaWidgets'):
         require_machine(stage / f'Qt{qt_versions[0]}{module}.dll', machine)
     require_machine(stage / 'platforms' / 'qwindows.dll', machine)
     helper = 'JumpServerClient.exe' if arch == 'amd64' else 'JumpServerClient32.exe'
@@ -315,8 +445,15 @@ def main():
             alternate.unlink()
         shutil.copy2(ROOT / 'LICENSE', stage / 'LICENSE.txt')
         deployqt = tool(args.windeployqt)
-        deploy_options = windeployqt_options(deployqt, deployment_major(cache))
+        qt_major = deployment_major(cache)
+        qt_plugins = Path(deployqt).parent.parent / 'plugins'
+        deploy_options = windeployqt_options(deployqt, qt_major)
         run([deployqt, *deploy_options, '--dir', stage, stage / 'client.exe'], 'Deploying matching Qt runtime and plugins')
+        deploy_windows_qt_plugins(qt_plugins, stage, qt_major)
+        prune_windows_qt_plugins(qt_plugins, stage, qt_major)
+        remove_qt_translations(stage)
+        validate_windows_qt_plugins(qt_plugins, stage, qt_major, args.native_tls)
+        without_ffmpeg(stage)
         compiler = tool(args.compiler or cache.get('CMAKE_CXX_COMPILER', 'cl'))
         is_msvc = Path(compiler).name.lower() in ('cl', 'cl.exe', 'clang-cl', 'clang-cl.exe')
         if is_msvc:
@@ -391,7 +528,9 @@ def main():
             with target.with_suffix(target.suffix + '.sha256').open('x', encoding='ascii') as checksum:
                 checksum.write(f'{digest}  {target.name}\n')
             metadata = {'artifact': target.name, 'version': version, 'arch': args.arch,
-                        'format': extension, 'signed': signer.enabled, 'sha256': digest}
+                        'format': extension, 'signed': signer.enabled, 'sha256': digest,
+                        'optimizations': {'qt_plugin_allowlist': True,
+                                          'qt_translations': False}}
             with target.with_suffix(target.suffix + '.manifest.json').open('x', encoding='utf-8') as manifest:
                 json.dump(metadata, manifest, indent=2)
                 manifest.write('\n')

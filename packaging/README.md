@@ -11,7 +11,7 @@
 python3 scripts/package-macos.py --build build-qt5 \
   --macdeployqt /path/to/Qt/bin/macdeployqt --output dist/OSMClient.app --deployment-target 11.0
 python3 scripts/package-dmg.py --app dist/OSMClient.app \
-  --output dist/OSMClient-4.1.2-macos-arm64.dmg --deployment-target 11.0
+  --output dist/OSMClient-4.1.4-macos-arm64.dmg --deployment-target 11.0
 
 # Windows：在匹配 Qt/编译器的开发命令行中配置 CMake 后，构建并生成两种安装包。
 python scripts/package-windows.py --build build-win --arch amd64 \
@@ -26,7 +26,7 @@ python3 scripts/package-linux.py --format rpm --build build-rpm --output dist/rp
 
 Linux 工具要求 Python ≥ 3.8、CMake ≥ 3.16、C++17 编译器、Qt Core/Gui/Widgets/Network/Svg、libsecret 开发包、`pkg-config`、`file`、`desktop-file-validate` 与 Go。DEB 另需 `dpkg-dev`；RPM 另需 `rpm-build`。可通过 `--helpers /path/to/bin` 注入同架构的预编译 Go 目录。Rocky 8 应使用 `python3.9` 等较新解释器，而非系统 Python 3.6。
 
-Linux 检查 ELF 架构及可执行位、校验包内文件与 Qt/libsecret 依赖，并生成 metadata/manifest。macOS DMG 默认执行镜像校验、只读挂载、包内签名和依赖检查以及启动 smoke。Windows 执行 PE 架构、Qt 插件、运行库和隔离 smoke 检查；本机只有 macOS/Linux 环境，Windows 安装行为需要 Windows 验收。
+Linux 检查 ELF 架构及可执行位、校验包内文件与 Qt/libsecret 依赖，并生成 metadata/manifest；DEB 和 RPM 使用 XZ 压缩，脚本会读取最终产物校验压缩格式，配置回退时直接失败。macOS DMG 默认执行镜像校验、只读挂载、包内签名和依赖检查以及启动 smoke，并使用 LZMA。Windows 执行 PE 架构、Qt 插件白名单、运行时和隔离 smoke 检查，不部署 Qt 翻译目录。`build.sh` 与 GitHub Actions 都调用同一套 `package-*.py`，本地和 CI 不需要各自维护体积参数。
 
 统一版本使用 CMake 的 `-DCLIENT_VERSION=X.Y.Z`；Linux 脚本用 `--cmake-arg CLIENT_VERSION=X.Y.Z` 传入。各目标应独立使用构建目录。
 
@@ -58,7 +58,7 @@ python3 scripts/build-launchers.py --output build/bin --go /path/to/go --goos da
 
 Use matching Go runtime/toolchain support for the required OS baseline. Building Qt for an old OS does not make a newer Go launcher compatible with it. CMake selects the target OS/architecture through `CLIENT_GOOS`/`CLIENT_GOARCH` and the toolchain through `GO_EXECUTABLE`; when building launchers directly, pass the target explicitly. Windows helper resources currently cover amd64/386; native Windows ARM64 is rejected because the vendored AutoIt/PuTTY dependencies have no native ARM64 build. All architectures need their own Qt and helper build.
 
-Place the generated `bin` tree beside the executable, or under `Contents/Resources/bin` in a macOS bundle. The launcher resolves paths relative to the application, never the process working directory. `CLIENT_QT_RESOURCE_DIR` optionally permits a development resource root. Application defaults are embedded as `:/config.json`; existing `jumpserver-client/config.json` is shared with the vendored helper, preserved on version upgrade, and saved atomically. Corrupt existing configuration is reported without replacement.
+Place the generated `bin` tree beside the executable, or under `Contents/Resources/bin` in a macOS bundle. The launcher resolves paths relative to the application, never the process working directory. `CLIENT_QT_RESOURCE_DIR` optionally permits a development resource root. Application defaults are embedded as `:/config.json`. User configuration and the FFmpeg plugin share a directory derived from the application display name, for example `OSMClient` uses `osm-client`; the configuration is preserved on version upgrade and saved atomically. Corrupt existing configuration is reported without replacement.
 
 ## macOS
 
@@ -72,7 +72,7 @@ The destination must not exist. This copies Qt frameworks/plugins, applies an ad
 
 兼容发布包使用独立源码构建的 Qt 与 Go 1.21.13，禁止混入 Homebrew 动态库。两个打包阶段均必须传 `--deployment-target`：Intel 为 `10.15`，Apple Silicon 为 `11.0`。每个 Mach-O 的架构和最低系统版本都会检查，缺少版本信息或高于目标立即失败；同时写入应用的 `LSMinimumSystemVersion`。跨架构构建见 [macOS 兼容构建](macos-compat.md)。
 
-Use `Info.plist.in` for `MACOSX_BUNDLE_INFO_PLIST`; it declares `jms://` and the Apple Events usage description needed to automate Terminal/iTerm. Deploy the Qt frameworks/plugins with the matching Qt installation's `macdeployqt`. Sign nested Go binaries/frameworks before the outer app, with hardened runtime, then notarize. Use `entitlements.macos.plist` for the app and protocol launcher that drives terminal automation; do not indiscriminately apply app entitlements to every library. The entitlement follows [Apple's hardened runtime documentation](https://developer.apple.com/documentation/security/hardened-runtime). Verify automation in the signed app on the target OS. Installing the app can affect which client receives the existing `jms` scheme.
+Use `Info.plist.in` for `MACOSX_BUNDLE_INFO_PLIST`; it declares `jms://` and the Apple Events usage description needed to automate Terminal/iTerm. Point `--macdeployqt` at the matching Qt installation so the script can locate its runtime roots; the script deploys a Qt plugin allowlist and recursively collects only their Mach-O dependencies. It removes Qt development headers, static libraries and `.prl` files before signing. DMG images use LZMA (`ULMO`) compression. Sign nested Go binaries/frameworks before the outer app, with hardened runtime, then notarize. Use `entitlements.macos.plist` for the app and protocol launcher that drives terminal automation; do not indiscriminately apply app entitlements to every library. The entitlement follows [Apple's hardened runtime documentation](https://developer.apple.com/documentation/security/hardened-runtime). Verify automation in the signed app on the target OS. Installing the app can affect which client receives the existing `jms` scheme.
 
 The bundle needs `Contents/Resources/bin/darwin-<arch>/JumpServerClient`, companion `client`, and `Scripts/iterm2_loader.scpt`. The Go binaries must retain executable mode. The source AppleScript files use mode `0644` and are read by `osascript`, so they do not need an executable bit.
 
