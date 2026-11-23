@@ -245,7 +245,7 @@ const columns: TableColumn<AssetItem>[] = [
         }
       );
     },
-    meta: { class: { th: "w-[28%]", td: "w-[28%]" } }
+    meta: { class: { th: "w-[40%]", td: "w-[40%]" } }
   },
   {
     accessorKey: "address",
@@ -259,41 +259,7 @@ const columns: TableColumn<AssetItem>[] = [
         },
         row.original.address
       ),
-    meta: { class: { th: "w-[28%]", td: "w-[28%]" } }
-  },
-  {
-    id: "user",
-    header: () => t("AssetCard.User"),
-    cell: ({ row }) => {
-      const userText = displayUser(row.original.id, row.original.permedAccounts!);
-      return h(
-        "div",
-        {
-          class: "truncate",
-          title: userText
-        },
-        userText
-      );
-    },
-    meta: { class: { th: "w-[18%]", td: "w-[18%]" } }
-  },
-  {
-    id: "protocol",
-    header: () => t("AssetCard.Protocol"),
-    cell: ({ row }) => {
-      const protocolText = displayProtocol(row.original.id, row.original.permedProtocols!);
-      if (!protocolText || protocolText === "-") {
-        return h("div", { class: "truncate" }, "-");
-      }
-      // const color = {
-      //   paid: "success" as const,
-      //   failed: "error" as const,
-      //   refunded: "neutral" as const
-      // }[row.getValue("status") as string];
-
-      return h(UButton, { size: "xs", class: "rounded-sm", variant: "subtle", color: "primary" }, () => protocolText);
-    },
-    meta: { class: { th: "w-[7%]", td: "w-[7%]" } }
+    meta: { class: { th: "w-[35%]", td: "w-[35%]" } }
   },
   {
     id: "actions",
@@ -341,7 +307,7 @@ const columns: TableColumn<AssetItem>[] = [
         }
       );
     },
-    meta: { class: { th: "w-[14%] text-center", td: "w-[14%] text-center" } }
+    meta: { class: { th: "w-[20%] text-center", td: "w-[20%] text-center" } }
   }
 ];
 </script>
@@ -360,7 +326,7 @@ const columns: TableColumn<AssetItem>[] = [
         :data="props.items"
         :columns="columns"
         :empty="t('Common.NoData')"
-        class="w-full min-w-[900px] table-fixed"
+        class="w-full min-w-[640px] table-fixed"
         :ui="{
           tr: 'hover:bg-muted/50 ',
           th: 'whitespace-nowrap text-xs sm:text-sm truncate',
