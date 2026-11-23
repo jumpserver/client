@@ -39,13 +39,12 @@ export const useConnectMethods = () => {
   const getMethodsForProtocol = async (protocol: string): Promise<ConnectMethod[]> => {
     const allMethods = await fetchConnectMethods();
     const protocolMethods = allMethods[protocol] || [];
-    if (protocol === "http") {
-      return protocolMethods.filter((method) => !method.disabled && method.type === "applet");
-    } else {
-      return protocolMethods.filter((method) => {
-        return !method.disabled && (method.type === "native" && !method.value.endsWith("_guide"));
-      });
-    }
+    return protocolMethods.filter((method) => {
+      if (method.disabled) return false;
+      // 远程应用也支持 orig_app 等自定义协议，按连接方式类型判断。
+      if (method.type === "applet") return true;
+      return protocol !== "http" && method.type === "native" && !method.value.endsWith("_guide");
+    });
   };
 
   const getDefaultMethodForProtocol = async (protocol: string): Promise<string> => {
