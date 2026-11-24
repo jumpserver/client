@@ -815,14 +815,8 @@ void MainWindow::buildUi() {
   avatar->setIcon(QIcon(QStringLiteral(":/images/user_avatar.png")));
   avatar->setIconSize(QSize(32, 32));
   profileRow->addWidget(avatar);
-  connect(avatar, &QPushButton::clicked, this, [this, avatar] {
-    if (m_restoring || !m_service->authenticated()) return;
-    QMenu menu(this);
-    menu.addAction(text("退出登录", "Sign out"), m_service, &AppService::logout);
-    menu.exec(avatar->mapToGlobal(QPoint(0, 0)) - QPoint(0, menu.sizeHint().height()));
-  });
   avatar->setContextMenuPolicy(Qt::CustomContextMenu);
-  connect(avatar, &QWidget::customContextMenuRequested, this, [this, avatar](const QPoint &) {
+  const auto showAvatarMenu = [this, avatar] {
     QMenu menu(this);
     menu.setObjectName("avatarContextMenu");
     auto *play = menu.addAction(ClientTheme::icon("clapperboard"), text("离线播放", "Offline playback"));
@@ -844,7 +838,9 @@ void MainWindow::buildUi() {
     if (selected == play) showOfflineReplay();
     else if (selected == transcode) showReplayTranscode();
     else if (selected && selected == logout) m_service->logout();
-  });
+  };
+  connect(avatar, &QPushButton::clicked, this, showAvatarMenu);
+  connect(avatar, &QWidget::customContextMenuRequested, this, [showAvatarMenu](const QPoint &) { showAvatarMenu(); });
   m_profile = new QLabel;
   m_profile->setTextFormat(Qt::PlainText);
   m_profile->setObjectName("profileLabel");
@@ -1895,7 +1891,7 @@ void MainWindow::updateSessionUi() {
   auto *avatar = findChild<QPushButton *>("avatar");
   avatar->setAccessibleName(active ? m_profile->text() : text("账户与站点", "Account and sites"));
   avatar->setToolTip(avatar->accessibleName().toHtmlEscaped().replace('\n', "<br>") +
-      "<br>" + text("右击打开录像工具", "Right-click for recording tools"));
+      "<br>" + text("点击打开录像工具", "Click for recording tools"));
 }
 void MainWindow::updateLoginState() {
   const bool pending = m_service->loginPending();
