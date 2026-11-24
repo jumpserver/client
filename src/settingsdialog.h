@@ -13,6 +13,7 @@ class SettingsDialog : public QDialog {
 public:
   explicit SettingsDialog(ConfigStore *config, const QJsonValue &version,
                           QWidget *parent = nullptr);
+  void selectReplayPlugin();
 signals:
   void preferencesChanged();
 

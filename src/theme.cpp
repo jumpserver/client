@@ -6,6 +6,7 @@
 #include <QIconEngine>
 #include <QLocale>
 #include <QListView>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QFontMetrics>
 #include <QScreen>
@@ -45,6 +46,27 @@ void ClientTheme::positionDialog(QWidget *dialog, bool initialPlacement, int ver
 }
 
 namespace {
+class IconButtonFocusFilter : public QObject {
+public:
+  explicit IconButtonFocusFilter(QObject *parent) : QObject(parent) {}
+protected:
+  bool eventFilter(QObject *watched, QEvent *event) override {
+    if (event->type() != QEvent::MouseButtonRelease) return false;
+    auto *button = qobject_cast<QAbstractButton *>(watched);
+    const auto *mouse = static_cast<QMouseEvent *>(event);
+    if (!button || mouse->button() != Qt::LeftButton || !button->text().isEmpty()) return false;
+    if (button->property("iconOnly").toBool() || !button->icon().isNull()) button->clearFocus();
+    return false;
+  }
+};
+IconButtonFocusFilter *iconButtonFocusFilter() {
+  static IconButtonFocusFilter *filter = nullptr;
+  if (!filter) {
+    filter = new IconButtonFocusFilter(qApp);
+    qApp->installEventFilter(filter);
+  }
+  return filter;
+}
 class SystemPaletteObserver : public QObject {
 public:
   explicit SystemPaletteObserver(QObject *parent) : QObject(parent), systemPalette(qApp->palette()) {}
@@ -150,8 +172,9 @@ ClientTheme::Colors paletteColors(bool dark) {
 // Scalable line icons follow the current palette without a platform icon font.
 class LineIconEngine : public QIconEngine {
 public:
-  explicit LineIconEngine(QString name) : m_name(std::move(name)) {}
-  QIconEngine *clone() const override { return new LineIconEngine(m_name); }
+  explicit LineIconEngine(QString name, QColor color = {})
+      : m_name(std::move(name)), m_color(std::move(color)) {}
+  QIconEngine *clone() const override { return new LineIconEngine(m_name, m_color); }
   void paint(QPainter *painter, const QRect &rect, QIcon::Mode mode, QIcon::State) override {
     static const QHash<QString, QString> shapes{
       {"terminal", "<rect x='3' y='4' width='18' height='16' rx='3'/><path d='m7 9 3 3-3 3m6 0h4'/>"},
@@ -165,6 +188,8 @@ public:
       {"search", "<circle cx='10.5' cy='10.5' r='6.5'/><path d='m16 16 4 4'/>"},
       {"sidebar", "<rect x='3' y='4' width='18' height='16' rx='3'/><path d='M9 4v16M6 8h.01M6 11h.01'/>"},
       {"refresh", "<path d='M21 3.5v5h-5M20.5 15a9 9 0 1 1-2.1-9.4L21 8.5'/>"},
+      {"replay-transcode", "<path d='m2 9 3-3 3 3M5 6h12a4 4 0 0 1 4 4v1M22 15l-3 3-3-3m3 3H7a4 4 0 0 1-4-4v-1'/>"},
+      {"clapperboard", "<path d='M4 11.5h16v7.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM2.5 6.5l15-3a2 2 0 0 1 2.3 1.5l.5 2.5-17.6 3.6-.6-2.3a2 2 0 0 1 1.4-2.3zM7.5 5.5l3 4M14 4.2l3 4.1'/>"},
       {"sort", "<path d='M8 4v16m-4-4 4 4 4-4M14 5h7M14 10h5M14 15h3'/>"},
       {"grid", "<rect x='3' y='3' width='7' height='7' rx='1.5'/><rect x='14' y='3' width='7' height='7' rx='1.5'/><rect x='3' y='14' width='7' height='7' rx='1.5'/><rect x='14' y='14' width='7' height='7' rx='1.5'/>"},
       {"list", "<path d='M9 5h12M9 12h12M9 19h12M3 5h1M3 12h1M3 19h1'/>"},
@@ -182,8 +207,14 @@ public:
       {"desktop", "<rect x='3' y='3' width='18' height='14' rx='2'/><path d='M8 21h8M12 17v4'/>"},
       {"palette", "<path d='M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1-3.7 2 2 0 0 1 1-3.7h3a3 3 0 0 0 3-3A9 9 0 0 0 12 3Z'/><path d='M7 10h.01M10 6.5h.01M15 7h.01M6 15h.01'/>"},
       {"app", "<rect x='3' y='3' width='7' height='7' rx='2'/><rect x='14' y='3' width='7' height='7' rx='2'/><rect x='3' y='14' width='7' height='7' rx='2'/><path d='M14 17.5h7M17.5 14v7'/>"},
+      {"plugin", "<path d='M9 3v4m6-4v4M6 7h12v3a6 6 0 0 1-6 6 6 6 0 0 1-6-6zM12 16v5'/>"},
       {"info", "<circle cx='12' cy='12' r='9'/><path d='M12 11v6M12 7h.01'/>"},
       {"folder", "<path d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z'/>"},
+      {"video", "<rect x='3' y='5' width='13' height='14' rx='2'/><path d='m16 10 5-3v10l-5-3z'/>"},
+      {"play", "<path d='m8 5 11 7-11 7Z'/>"},
+      {"plus", "<path d='M12 5v14M5 12h14'/>"},
+      {"trash", "<path d='M4 7h16m-14 0 1 13h10l1-13M9 7V4h6v3M10 10v6m4-6v6'/>"},
+      {"edit", "<path d='m15 5 4 4M4 20l4.5-1L20 7.5 16.5 4 5 15.5Z'/>"},
       {"download", "<path d='M12 4v11m-4-4 4 4 4-4M4 19h16'/>"},
       {"copy", "<rect x='9' y='9' width='11' height='11' rx='2'/><path d='M15 5a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2'/>"}
     };
@@ -191,10 +222,12 @@ public:
     const bool filledStar = m_name == "star-filled";
     const bool outlineStar = m_name == "star-outline";
     const QColor color = mode == QIcon::Disabled ? c.muted
+        : m_color.isValid() ? m_color
         : filledStar ? c.accent : outlineStar && mode != QIcon::Active ? c.muted : c.text;
-    const QString svg = QStringLiteral("<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='%3' stroke='%1' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'>%2</svg>")
+    const QString strokeWidth = m_name == "replay-transcode" ? QStringLiteral("2") : QStringLiteral("1.7");
+    const QString svg = QStringLiteral("<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='%3' stroke='%1' stroke-width='%4' stroke-linecap='round' stroke-linejoin='round'>%2</svg>")
         .arg(color.name(), shapes.value(filledStar || outlineStar ? "star" : m_name, shapes.value("app")),
-             filledStar ? color.name() : QStringLiteral("none"));
+             filledStar ? color.name() : QStringLiteral("none"), strokeWidth);
     QSvgRenderer renderer(svg.toUtf8());
     renderer.render(painter, rect);
   }
@@ -207,6 +240,7 @@ public:
   }
 private:
   QString m_name;
+  QColor m_color;
 };
 } // namespace
 
@@ -309,7 +343,7 @@ QString text(const char *zh, const char *en) {
   return QString::fromUtf8(chinese ? zh : en);
 }
 Colors colors() { return paletteColors(qApp->palette().color(QPalette::Window).lightness() < 128); }
-QIcon icon(const QString &name) { return QIcon(new LineIconEngine(name)); }
+QIcon icon(const QString &name, const QColor &color) { return QIcon(new LineIconEngine(name, color)); }
 QSize buttonSize(QAbstractButton *button, bool compact) {
   button->ensurePolished();
   const QFontMetrics metrics(button->font());
@@ -323,6 +357,7 @@ QSize buttonSize(QAbstractButton *button, bool compact) {
           qMax(compact ? 30 : 32, height + (compact ? 10 : 14))};
 }
 void apply() {
+  iconButtonFocusFilter();
   auto *observer = paletteObserver();
   if (observer->applying) return;
   observer->applying = true;
@@ -365,14 +400,50 @@ QLabel#welcomeTitle { font-size: 22px; font-weight: 600; }
 QFrame#sidebar, QFrame#settingsSidebar { background: @sidebar@; border: none; border-right: 1px solid @border@; }
 QFrame#topbar { background: @panel@; border: none; border-bottom: 1px solid @border@; }
 QFrame[surface=true] { background: @panel@; border: 1px solid @border@; border-radius: 12px; }
+QDialog[replayPage=true] { background: qradialgradient(cx:0, cy:0, radius:1.25, stop:0 @softAccent@, stop:0.64 @background@); }
+QFrame#replayStage { background: #121418; border: 1px solid @border@; border-radius: 12px; }
+QFrame#replayStage QLabel#replayTime { color: #e6e8eb; font-size: 12px; }
+QPushButton[replayControl=true] { background: transparent; border: none; padding: 4px; }
+QPushButton[replayControl=true]:hover:enabled { background: #34373d; }
+QPushButton#toggleReplayPlaylist { background: transparent; border: none; border-radius: 6px; padding: 0; min-width: 0; min-height: 0; }
+QPushButton#toggleReplayPlaylist:hover { background: @softAccent@; }
+QComboBox#replaySpeed { background: transparent; color: #d5d8dc; border: none; border-radius: 5px; padding: 2px 20px 2px 7px; min-height: 0; font-size: 12px; font-weight: 400; }
+QComboBox#replaySpeed:hover:enabled, QComboBox#replaySpeed:on { background: #34373d; }
+QComboBox#replaySpeed:disabled { color: #8a8d94; }
+QComboBox#replaySpeed::drop-down { width: 16px; }
+QComboBox#replaySpeed::down-arrow { width: 11px; height: 11px; }
+QComboBox#replaySpeed QAbstractItemView { background: #25282e; color: #f2f2f2; selection-background-color: #454951; selection-color: #ffffff; }
+QWidget#replayDropZone, QLabel#replayEmptyPlaylist { background: @background@; border: 1px dashed @border@; border-radius: 9px; }
+QWidget#replayDropZone[dragging=true] { background: @softAccent@; border: 2px dashed @accent@; }
+QLabel#replayDropIcon { background: @softAccent@; color: @accent@; border-radius: 24px; font-size: 18px; padding-left: 2px; }
+QLabel#replayDropTitle { color: @text@; font-size: 16px; font-weight: 600; }
+QLabel#replayDropDescription { color: @muted@; font-size: 12px; font-weight: 400; }
+QFrame[replayCard=true] { background: @panel@; border: 1px solid @border@; border-radius: 9px; }
+QDialog#replayDetailsPopup { background: @panel@; border: none; border-radius: 0; }
+QLabel[role=replayBadge] { background: @background@; color: @muted@; border-radius: 8px; padding: 3px 8px; font-size: 12px; font-weight: 600; }
+QLabel[role=replayBadge][tone=accent] { background: @softAccent@; color: @accent@; }
+QLabel[role=replayBadge][tone=warning] { background: rgba(217, 151, 40, 35); color: @text@; }
+QLabel[role=replayBadge][tone=success] { background: rgba(38, 174, 99, 40); color: @text@; }
+QLabel[role=replayBadge][tone=error] { background: rgba(230, 79, 82, 40); color: @text@; }
+QLabel[role=replayIcon] { background: @softAccent@; padding: 6px; border-radius: 7px; }
+QLabel[role=replayOutput] { background: @background@; color: @text@; padding: 5px 8px; border-radius: 6px; }
+QDialog[replayPage=true] QProgressBar { background: @background@; border: none; border-radius: 3px; min-height: 6px; max-height: 6px; }
+QDialog[replayPage=true] QProgressBar::chunk { background: @accent@; border-radius: 3px; }
+QProgressBar#replayPluginProgress { background: @background@; border: none; border-radius: 3px; min-height: 6px; max-height: 6px; }
+QProgressBar#replayPluginProgress::chunk { background: @accent@; border-radius: 3px; }
+QListWidget#replayFiles, QListWidget#replayTranscodeQueue { background: transparent; border: none; outline: 0; }
+QListWidget#replayFiles::item { padding: 0 8px; border: 1px solid transparent; border-radius: 7px; }
+QListWidget#replayFiles::item:hover { background: @hover@; }
+QListWidget#replayFiles::item:selected { background: @softAccent@; border-color: @accent@; color: @text@; }
 QFrame#dialogHeader { border: none; border-bottom: 1px solid @border@; background: transparent; }
 QFrame#dialogFooter { border: none; border-top: 1px solid @border@; background: @background@; }
+QFrame#replaySettingsDivider { background: @border@; border: none; max-height: 1px; min-height: 1px; }
 QFrame#profilePanel { border: none; border-top: 1px solid @border@; background: transparent; }
 QLabel#avatar { background: @selected@; border-radius: 16px; }
 QLineEdit, QComboBox, QSpinBox, QFontComboBox { color: @text@; background: @panel@; border: 1px solid @border@; border-radius: 7px; padding: 7px 10px; min-height: 18px; }
 QLineEdit:hover, QComboBox:hover, QSpinBox:hover { border-color: @muted@; }
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border-color: @accent@; }
-QLineEdit:disabled, QComboBox:disabled { color: @muted@; background: @background@; }
+QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled { color: @muted@; background: @background@; }
 QLineEdit#assetSearch { background: @searchBackground@; border: 1px solid @border@; border-radius: 8px; padding: 0 8px 0 0; min-height: 36px; }
 QLineEdit#assetSearch:hover { border-color: @muted@; }
 QLineEdit#assetSearch:focus { background: @panel@; border-color: @accent@; }
@@ -383,7 +454,7 @@ QComboBox:on { border-color: @accent@; }
 QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: top right; border: none; width: 30px; }
 QComboBox::down-arrow { image: url(:/ui/chevron-down.svg); width: 14px; height: 14px; }
 QComboBox::down-arrow:on { image: url(:/ui/chevron-up.svg); }
-QComboBox QAbstractItemView { background: @panel@; color: @text@; border: none; border-radius: 8px; padding: 4px; outline: 0; selection-background-color: @softAccent@; selection-color: @text@; }
+QComboBox QAbstractItemView { background: @panel@; color: @text@; border: none; border-radius: 0; padding: 4px; outline: 0; selection-background-color: @softAccent@; selection-color: @text@; }
 QComboBox QLineEdit { border: none; background: transparent; padding: 0; }
 QComboBox#organizationSelector { background: transparent; border: none; font-weight: 500; }
 QSpinBox::up-button, QSpinBox::down-button { border: none; background: transparent; width: 20px; }
@@ -394,6 +465,7 @@ QPushButton:hover:enabled, QToolButton:hover:enabled { background: @hover@; }
 QPushButton:checked, QToolButton:checked, QPushButton:pressed:enabled, QToolButton:pressed:enabled { background: @selected@; }
 QPushButton:focus:enabled, QToolButton:focus:enabled { border-color: @accent@; }
 QPushButton:disabled, QToolButton:disabled { background: @panel@; color: @muted@; border-color: @border@; }
+QPushButton[replayControl=true]:disabled { background: transparent; border: none; }
 QPushButton[primary=true] { background: @accent@; color: white; border: 1px solid @accent@; font-weight: 600; }
 QPushButton[primary=true]:hover:enabled { background: @accentHover@; border-color: @accentHover@; }
 QPushButton[primary=true]:pressed:enabled { background: @accentPressed@; border-color: @accentPressed@; }
@@ -477,7 +549,12 @@ QMenu::item:selected { background: @hover@; }
 QMenu::right-arrow { image: url(:/ui/chevron-right.svg); width: 14px; height: 14px; }
 QMenu::left-arrow { image: url(:/ui/chevron-left.svg); width: 14px; height: 14px; }
 QMenu::separator { height: 1px; background: @border@; margin: 5px 8px; }
-QToolTip { color: @text@; background: @panel@; border: 1px solid @border@; border-radius: 5px; padding: 2px 4px; }
+QMenu#avatarContextMenu { background: @panel@; border: none; border-radius: 0; padding: 6px; }
+QMenu#avatarContextMenu::item { padding: 8px 12px 8px 24px; margin: 1px 0; border-radius: 7px; }
+QMenu#avatarContextMenu::item:selected { color: @text@; background: @softAccent@; }
+QMenu#avatarContextMenu::icon { left: 8px; }
+QMenu#avatarContextMenu::separator { margin: 5px 8px; }
+QToolTip { color: @text@; background: @panel@; border: none; border-radius: 0; padding: 2px 4px; }
 QStatusBar { color: @muted@; background: @background@; border: none; font-size: 12px; }
 QStatusBar::item { border: none; }
 )CSS");

@@ -57,13 +57,13 @@ macOS 沿用原 `clients` 的 Secrets 名称：
 
 Action 均固定到完整 commit SHA，并注释对应版本。构建工具固定 Python 3.12.10、CMake 3.31.6、Ninja 1.11.1.4、Go 1.21.13；Windows 校验 runner 内 WiX 3.14.1 与 NSIS 3.10，不匹配会失败并要求更新配置。Qt 源码下载地址、SHA256 和 Windows jom 1.1.4 哈希在 `scripts/build-qt.py` 中固定。
 
-macOS/Windows 编译 Qt Base、Qt SVG、部署工具，关闭不用的 OpenGL、数据库驱动和 Qt Tools。Qt 使用共享库；Windows 使用系统 Schannel，macOS 使用系统 Secure Transport，避免捆绑旧 OpenSSL 运行库或 Homebrew 的高版本最低 OS 依赖。固定 Xcode/SDK 与部署目标同时传给 Qt 和应用。
+macOS/Windows 编译 Qt Base、Qt SVG、部署工具，关闭不用的 OpenGL、数据库驱动和 Qt Tools。Qt 使用共享库；Windows 使用系统 Schannel，macOS 使用系统 Secure Transport，避免捆绑旧 OpenSSL 运行库或 Homebrew 的高版本最低 OS 依赖。固定 Xcode/SDK 与部署目标同时传给 Qt 和应用。安装包瘦身集中在 `package-*.py`、`package-dmg.py` 和 `packaging/linux.cmake`：macOS 使用插件白名单、开发文件清理和 LZMA DMG，Windows 禁用翻译并收敛 Qt 插件，Linux 使用系统 Qt 和 XZ DEB/RPM；`build.sh` 与 workflow 都调用这些共享入口。
 
 首次源码构建耗时较长，job 给 macOS 150 分钟、Windows 180 分钟。后续缓存安装后的 Qt 前缀，cache key 包含 Qt 版本、平台、架构、编译器/SDK或部署目标以及整个构建脚本的哈希；没有宽泛回退 key。构建脚本也校验完成标记、Qt SVG/Test 和部署工具是否齐全。需要重试不完整的本地 Qt 构建时，请使用新的 `--prefix`、`--work` 目录，脚本不会自动删除已有安装。
 
 ## 验证范围
 
-流水线只构建、打包和校验安装包，不编译或运行测试程序。通用 Linux 包和麒麟桌面版 DEB 在第二个干净容器中安装，检查依赖、MIME 注册、有效载荷及 `--smoke-test`；麒麟服务器 RPM 仅执行构建和打包检查。Windows 在一次性 GitHub-hosted runner 上验证 EXE/MSI 安装、安装后启动、正常卸载，以及其他应用接管 `jms` 后卸载仍保留该处理器。macOS 打包脚本检查 Mach-O 依赖和签名；签名任务另外执行 Apple 公证及 stapler 验证。
+流水线在打包前完成各平台原生构建和依赖检查。通用 Linux 包和麒麟桌面版 DEB 在第二个干净容器中安装，检查依赖、MIME 注册、有效载荷及 `--smoke-test`；Linux 打包脚本还会校验最终 DEB/RPM 的实际 XZ payload。麒麟服务器 RPM 仅执行构建和打包检查。Windows 在一次性 GitHub-hosted runner 上验证 EXE/MSI 安装、安装后启动、正常卸载，以及其他应用接管 `jms` 后卸载仍保留该处理器。macOS 打包脚本检查 Mach-O 依赖和签名；签名任务另外执行 Apple 公证及 stapler 验证。各平台 job 会把最终安装包字节数和 MiB 写入 GitHub Actions 运行摘要，便于持续比较体积。
 
 GitHub macOS hosted runner 偶发 `hdiutil create - Resource busy` 时，DMG 创建最多尝试 10 次（失败后间隔 5 秒，最多 9 次重试），仅清理本次未完成的目标文件；之后仍执行镜像校验、挂载检查、依赖检查及可用的启动 smoke test，不降低安装包的验证范围。
 

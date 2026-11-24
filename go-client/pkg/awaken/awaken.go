@@ -3,6 +3,7 @@ package awaken
 import (
 	"fmt"
 	"go-client/global"
+	"go-client/pkg/appdata"
 	"go-client/pkg/config"
 	"io/ioutil"
 	"net/url"
@@ -107,11 +108,11 @@ func runApplication(cmd *exec.Cmd, name string) {
 
 func removeCurRdpVncFile() {
 	re := regexp.MustCompile(`(?i)\.(rdp|vncpaxx)$`)
-	dir, _ := os.UserConfigDir()
-	rd, _ := ioutil.ReadDir(filepath.Join(dir, config.DirectoryName()))
+	dir, _ := appdata.Directory()
+	rd, _ := ioutil.ReadDir(dir)
 	for _, v := range rd {
 		if !v.IsDir() && re.MatchString(v.Name()) {
-			os.Remove(filepath.Join(dir, config.DirectoryName(), v.Name()))
+			os.Remove(filepath.Join(dir, v.Name()))
 		}
 	}
 }
@@ -134,8 +135,8 @@ func (r *Rouse) HandleRDP(appConfig *config.AppConfig) {
 	removeCurRdpVncFile()
 	fileName, _ := url.QueryUnescape(r.File.Name)
 	replacer := strings.NewReplacer(" ", "", ":", "_", "-", "_")
-	dir, _ := os.UserConfigDir()
-	filePath := filepath.Join(dir, config.DirectoryName(), replacer.Replace(fileName)+".rdp")
+	dir, _ := appdata.Directory()
+	filePath := filepath.Join(dir, replacer.Replace(fileName)+".rdp")
 	err := ioutil.WriteFile(filePath, []byte(r.Content), os.ModePerm)
 	if err != nil {
 		reportError(err.Error())

@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 from macos_common import sign, resolve_signing, smoke
+from replay_payload import deploy_replay_plugins, without_ffmpeg
 
 
 MACHO_MAGIC = {bytes.fromhex(value) for value in (
@@ -19,6 +20,62 @@ MACHO_MAGIC = {bytes.fromhex(value) for value in (
     'cafebabe', 'bebafeca', 'cafebabf', 'bfbafeca')}
 LOAD_COMMANDS = {'LC_LOAD_DYLIB', 'LC_LOAD_WEAK_DYLIB', 'LC_REEXPORT_DYLIB',
                  'LC_LOAD_UPWARD_DYLIB', 'LC_LAZY_LOAD_DYLIB'}
+QT_RUNTIME_PLUGINS = {
+    5: (
+        'platforms/libqcocoa.dylib',
+        'styles/libqmacstyle.dylib',
+        'imageformats/libqjpeg.dylib',
+        'imageformats/libqwebp.dylib',
+        'imageformats/libqsvg.dylib',
+        'iconengines/libqsvgicon.dylib',
+        'mediaservice/libqavfmediaplayer.dylib',
+        'mediaservice/libqtmedia_audioengine.dylib',
+        'audio/libqtaudio_coreaudio.dylib',
+    ),
+    6: (
+        'platforms/libqcocoa.dylib',
+        'styles/libqmacstyle.dylib',
+        'imageformats/libqjpeg.dylib',
+        'imageformats/libqwebp.dylib',
+        'imageformats/libqsvg.dylib',
+        'iconengines/libqsvgicon.dylib',
+        'multimedia/libdarwinmediaplugin.dylib',
+        'tls/libqsecuretransportbackend.dylib',
+    ),
+}
+
+
+def cmake_cache_value(cache, key):
+    match = re.search(r'^{}:[^=]*=(.+)$'.format(re.escape(key)),
+                      cache.read_text(), re.MULTILINE)
+    return match.group(1).strip() if match else None
+
+
+def qt_runtime_roots(build, major, macdeployqt):
+    cache = build / 'CMakeCache.txt'
+    prefixes = []
+    value = cmake_cache_value(cache, 'CMAKE_PREFIX_PATH')
+    if value:
+        prefixes.extend(Path(item) for item in value.split(';'))
+    for key in ('Qt{}_DIR'.format(major), 'Qt{}Core_DIR'.format(major)):
+        value = cmake_cache_value(cache, key)
+        if not value:
+            continue
+        for item in value.split(';'):
+            path = Path(item)
+            prefixes.append(path.parents[2] if len(path.parents) >= 3 else path)
+    for path in (Path(macdeployqt).absolute(), Path(macdeployqt).resolve()):
+        prefixes.append(path.parent.parent)
+    seen = set()
+    for prefix in prefixes:
+        prefix = prefix.resolve()
+        if prefix in seen:
+            continue
+        seen.add(prefix)
+        for plugins in (prefix / 'plugins', prefix / 'share/qt/plugins'):
+            if (plugins / 'platforms/libqcocoa.dylib').is_file():
+                return plugins, prefix / 'lib'
+    raise RuntimeError('Matching Qt Cocoa plugin root is missing')
 
 
 def inside(path, root):
@@ -117,6 +174,14 @@ def repair_dependencies(bundle, search_paths):
     executable = bundle / 'Contents/MacOS/client'
     frameworks = bundle / 'Contents/Frameworks'
     frameworks.mkdir(parents=True, exist_ok=True)
+    search_paths = list(dict.fromkeys(path.resolve() for path in search_paths))
+    for path in macho_files(bundle):
+        for dependency in inspect_macho(path)['dependencies']:
+            if not system_library(dependency) and Path(dependency).is_absolute():
+                source = Path(dependency)
+                if source.is_file():
+                    search_paths.append(source.parent.resolve())
+    search_paths = list(dict.fromkeys(search_paths))
     processed = set()
     while True:
         pending = [path for path in macho_files(bundle) if path not in processed]
@@ -130,6 +195,9 @@ def repair_dependencies(bundle, search_paths):
                     continue
                 target = resolve_dependency(dependency, path, info, executable, frameworks, search_paths)
                 if not inside(target, bundle):
+                    external_root = target.parent.resolve()
+                    if external_root not in search_paths:
+                        search_paths.append(external_root)
                     target = copy_dependency(target, frameworks)
                 replacement = '@loader_path/' + os.path.relpath(target, path.parent)
                 if dependency != replacement:
@@ -147,6 +215,41 @@ def repair_dependencies(bundle, search_paths):
                 subprocess.run(['install_name_tool', *changes, str(path)], check=True,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             processed.add(path)
+
+
+def deploy_qt_plugins(source, destination, major):
+    plugins = QT_RUNTIME_PLUGINS.get(major)
+    if plugins is None:
+        raise RuntimeError('Unsupported Qt major version for macOS packaging: {}'.format(major))
+    if not (source / 'platforms/libqcocoa.dylib').is_file():
+        raise RuntimeError('Target Qt Cocoa plugin is missing')
+    copied = []
+    for relative in plugins:
+        plugin = source / relative
+        if not plugin.is_file():
+            continue
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(plugin, target)
+        copied.append(relative)
+    return copied
+
+
+def remove_development_artifacts(bundle):
+    frameworks = bundle / 'Contents/Frameworks'
+    if not frameworks.is_dir():
+        return
+    headers = sorted((path for path in frameworks.rglob('Headers')
+                      if path.is_symlink() or path.is_dir()),
+                     key=lambda path: len(path.parts), reverse=True)
+    for path in headers:
+        if path.is_symlink():
+            path.unlink()
+        else:
+            shutil.rmtree(path)
+    for path in frameworks.rglob('*'):
+        if path.is_file() and path.suffix in ('.a', '.prl'):
+            path.unlink()
 
 
 def audit_bundle(bundle):
@@ -215,10 +318,12 @@ def enforce_deployment(report, target):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build', type=Path, required=True)
-    parser.add_argument('--macdeployqt', type=Path, required=True)
+    parser.add_argument('--macdeployqt', type=Path, required=True,
+                        help='Matching Qt macdeployqt; used to locate the Qt runtime roots')
     parser.add_argument('--libpath', type=Path, action='append', default=[],
                         help='Additional dependency library search directory (repeatable)')
-    parser.add_argument('--plugins-dir', type=Path, help='Target Qt plugins for a cross-build using native macdeployqt')
+    parser.add_argument('--plugins-dir', type=Path,
+                        help='Target Qt plugin root for a cross-build; defaults to the macdeployqt Qt prefix')
     parser.add_argument('--output', type=Path, default=Path('dist/OSMClient.app'))
     parser.add_argument('--sign', action='store_true', help='Request Developer ID signing; skip when no signing identity is available')
     parser.add_argument('--deployment-target', required=True, help='Reject every binary requiring a newer macOS')
@@ -240,23 +345,23 @@ def main():
     info = plistlib.loads(info_path.read_bytes())
     info['LSMinimumSystemVersion'] = args.deployment_target
     info_path.write_bytes(plistlib.dumps(info))
-    if args.plugins_dir:
-        # macdeployqt searches its own Qt prefix even with -libpath/-no-plugins.
-        # Cross-builds must collect target libraries through the Mach-O resolver.
-        if not (args.plugins_dir / 'platforms/libqcocoa.dylib').is_file():
-            raise RuntimeError('Target Qt Cocoa plugin is missing')
-        shutil.copytree(args.plugins_dir, destination / 'Contents/PlugIns', symlinks=True)
-        (destination / 'Contents/Resources/qt.conf').write_text('[Paths]\nPlugins = PlugIns\n')
-        destination.with_suffix('.deployment.log').write_text('Target Qt plugins and recursive Mach-O dependency deployment.\n')
-    else:
-        deployed = subprocess.run([str(args.macdeployqt.resolve()), str(destination),
-                                   '-always-overwrite',
-                                   *['-libpath=' + str(path.resolve()) for path in args.libpath]],
-                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        destination.with_suffix('.deployment.log').write_text(deployed.stdout)
-        if deployed.returncode != 0 or re.search(r'^\s*ERROR\b', deployed.stdout, re.MULTILINE):
-            raise RuntimeError('macdeployqt reported a failure; inspect {}'.format(destination.with_suffix('.deployment.log')))
-    repair_dependencies(destination, [path.resolve() for path in args.libpath])
+    qt_major = 6 if 'Qt6Multimedia_DIR:' in (args.build / 'CMakeCache.txt').read_text() else 5
+    qt_plugins, qt_lib = ((args.plugins_dir.resolve(), None)
+                          if args.plugins_dir
+                          else qt_runtime_roots(args.build.resolve(), qt_major, args.macdeployqt))
+    copied_plugins = deploy_qt_plugins(qt_plugins, destination / 'Contents/PlugIns', qt_major)
+    (destination / 'Contents/Resources/qt.conf').write_text('[Paths]\nPlugins = PlugIns\n')
+    destination.with_suffix('.deployment.log').write_text(
+        'Deployed Qt runtime plugin allowlist and recursive Mach-O dependencies:\n{}\n'.format(
+            '\n'.join(copied_plugins)))
+    deploy_replay_plugins(qt_plugins, destination / 'Contents/PlugIns', qt_major, windows=False)
+    without_ffmpeg(destination)
+    library_paths = [path.resolve() for path in args.libpath]
+    if qt_lib:
+        library_paths.append(qt_lib)
+    repair_dependencies(destination, library_paths)
+    remove_development_artifacts(destination)
+    without_ffmpeg(destination)
     report = audit_bundle(destination)
     enforce_deployment(report, args.deployment_target)
     sign_bundle(destination, args.sign)

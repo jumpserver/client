@@ -73,7 +73,7 @@ def resolve_notarization(requested, signed):
 
 def create_image(staging, volume_name, output):
     command = ['hdiutil', 'create', '-ov', '-volname', volume_name, '-srcfolder', str(staging),
-               '-fs', 'HFS+', '-format', 'UDZO', '-imagekey', 'zlib-level=9', str(output)]
+               '-fs', 'HFS+', '-format', 'ULMO', str(output)]
     for attempt in range(10):
         try:
             return run(command, timeout=600)
@@ -209,6 +209,7 @@ def main():
             checksum.update(chunk)
     manifest = {'file': output.name, 'version': info.get('CFBundleShortVersionString'),
                 'architecture': architecture, 'minimum_macos': report['minimum_macos'],
+                'compression': 'ULMO/LZMA',
                 'sha256': checksum.hexdigest(), 'signed': args.sign, 'notarized': args.notarize,
                 'notarization_submission': submission, 'verified': ['image-checksum', 'mounted-app-signature', 'mounted-app-dependencies', 'mounted-app-smoke']}
     manifest['deployment_target'] = args.deployment_target

@@ -666,51 +666,139 @@ void AppService::assets(QString category, QString search, int offset, int limit,
     }
     const QString first = category == "windows" ? "windows" : "unix";
     const QString second = category == "windows" ? "windows_ad" : "other";
-    addQueryItem(query, "type", first);
-    fetchAssetType(query, 0, {}, requestId, [this, query, second, requestId, offset, limit, order](QJsonArray firstItems, QString failure) mutable {
-        if (requestId != m_assetRequest) return;
-        if (!failure.isEmpty()) { emit error(failure); return; }
-        query.removeAllQueryItems("type"); addQueryItem(query, "type", second);
-        fetchAssetType(query, 0, {}, requestId, [this, firstItems, requestId, offset, limit, order](QJsonArray secondItems, QString failure) {
-            if (requestId != m_assetRequest) return;
-            if (!failure.isEmpty()) { emit error(failure); return; }
-            QSet<QString> ids; std::vector<QJsonValue> items;
-            for (const auto &list : {firstItems, secondItems}) for (const auto &item : list) {
-                const auto id = item.toObject().value("id").toString();
-                if (id.isEmpty() || !ids.contains(id)) { ids.insert(id); items.push_back(item); }
-            }
-            const QString normalized = order.trimmed().isEmpty() ? "name" : order.trimmed();
-            const bool descending = normalized.startsWith('-');
-            const QString field = descending ? normalized.mid(1) : normalized;
-            std::stable_sort(items.begin(), items.end(), [field, descending](QJsonValue a, QJsonValue b) {
-                const auto left = a.toObject(), right = b.toObject();
-                int comparison = QString::compare(left.value(field).toString().toLower(), right.value(field).toString().toLower());
-                if (!comparison) comparison = QString::compare(left.value("id").toString(), right.value("id").toString());
-                return descending ? comparison > 0 : comparison < 0;
-            });
-            QJsonArray page;
-            for (int i = offset; i < qMin(static_cast<int>(items.size()), offset + limit); ++i) page.append(items.at(i));
-            emit assetsReady(page, static_cast<int>(items.size()));
-        });
-    });
-}
+    QUrlQuery firstQuery = query, secondQuery = query;
+    addQueryItem(firstQuery, "type", first);
+    addQueryItem(secondQuery, "type", second);
 
-void AppService::fetchAssetType(QUrlQuery query, int offset, QJsonArray accumulated, quint64 requestId,
-                                std::function<void(QJsonArray, QString)> done)
-{
-    if (requestId != m_assetRequest) return;
-    query.removeAllQueryItems("offset"); query.removeAllQueryItems("limit");
-    addQueryItem(query, "offset", QString::number(offset)); addQueryItem(query, "limit", "200");
-    api("GET", assetRoot, query, {}, [this, query, offset, accumulated, requestId, done](QJsonValue value, QString failure, int) mutable {
-        if (requestId != m_assetRequest) return;
-        if (!failure.isEmpty()) { done({}, failure); return; }
-        QJsonArray page; int count = 0;
-        if (!pageData(value, page, count)) { done({}, tr("资产列表响应格式错误")); return; }
-        for (const auto &item : page) accumulated.append(item);
-        if (accumulated.size() > 1000000) { done({}, tr("资产数量超过客户端合并上限，请缩小搜索范围")); return; }
-        if (page.isEmpty() || accumulated.size() >= count) { done(accumulated, {}); return; }
-        fetchAssetType(query, offset + page.size(), accumulated, requestId, done);
-    });
+    // The API only filters one asset type per request. Merge its two sorted
+    // streams page by page instead of retaining both complete QJsonArrays.
+    struct Stream {
+        QUrlQuery query;
+        QJsonArray page;
+        int offset = 0;
+        int index = 0;
+        bool exhausted = false;
+        bool loading = false;
+    };
+    struct Merge {
+        Stream first, second;
+        QJsonArray page;
+        // Exact cross-type de-duplication; only IDs are retained, while asset
+        // objects stay in the two 200-item stream windows.
+        QSet<QString> ids;
+        int unique = 0;
+        QString field;
+        bool descending = false;
+        std::function<void()> advance;
+        std::function<void(Stream &)> load;
+    };
+    auto merge = std::make_shared<Merge>();
+    merge->first.query = firstQuery;
+    merge->second.query = secondQuery;
+    const QString normalized = order.trimmed().isEmpty() ? "name" : order.trimmed();
+    merge->descending = normalized.startsWith('-');
+    merge->field = merge->descending ? normalized.mid(1) : normalized;
+
+    const auto before = [field = merge->field, descending = merge->descending]
+                        (const QJsonValue &left, const QJsonValue &right) {
+        const auto leftObject = left.toObject(), rightObject = right.toObject();
+        int comparison = QString::compare(leftObject.value(field).toString().toLower(),
+                                          rightObject.value(field).toString().toLower());
+        if (!comparison)
+            comparison = QString::compare(leftObject.value("id").toString(),
+                                          rightObject.value("id").toString());
+        return descending ? comparison > 0 : comparison < 0;
+    };
+
+    const std::weak_ptr<Merge> weakMerge = merge;
+    const auto releaseChain = [this, weakMerge] {
+        QTimer::singleShot(0, this, [weakMerge] {
+            if (const auto merge = weakMerge.lock()) {
+                merge->advance = {};
+                merge->load = {};
+            }
+        });
+    };
+    const auto finish = [this, requestId, weakMerge, releaseChain] {
+        if (requestId != m_assetRequest) {
+            return;
+        }
+        const auto merge = weakMerge.lock();
+        if (!merge) return;
+        releaseChain();
+        emit assetsReady(merge->page, merge->unique);
+    };
+    merge->load = [this, requestId, weakMerge, releaseChain](Stream &stream) {
+        const auto merge = weakMerge.lock();
+        if (!merge || stream.loading || stream.exhausted || requestId != m_assetRequest) return;
+        Stream *target = &stream;
+        target->loading = true;
+        QUrlQuery query = target->query;
+        addQueryItem(query, "offset", QString::number(target->offset));
+        addQueryItem(query, "limit", "200");
+        api("GET", assetRoot, query, {}, [this, requestId, merge, releaseChain, target](QJsonValue value, QString failure, int) mutable {
+            target->loading = false;
+            if (requestId != m_assetRequest) { releaseChain(); return; }
+            if (!failure.isEmpty()) {
+                releaseChain();
+                emit error(failure);
+                return;
+            }
+            QJsonArray page;
+            int count = 0;
+            if (!pageData(value, page, count)) {
+                releaseChain();
+                emit error(tr("资产列表响应格式错误"));
+                return;
+            }
+            target->page = page;
+            target->index = 0;
+            target->offset += page.size();
+            target->exhausted = page.isEmpty() || target->offset >= count;
+            merge->advance();
+        });
+    };
+    merge->advance = [this, requestId, offset, limit, weakMerge, before, finish]() {
+        const auto merge = weakMerge.lock();
+        if (!merge) return;
+        while (requestId == m_assetRequest) {
+            if (!merge->first.exhausted && merge->first.index >= merge->first.page.size()) {
+                merge->load(merge->first);
+                if (merge->first.loading) return;
+            }
+            if (!merge->second.exhausted && merge->second.index >= merge->second.page.size()) {
+                merge->load(merge->second);
+                if (merge->second.loading) return;
+            }
+            const bool firstAvailable = merge->first.index < merge->first.page.size();
+            const bool secondAvailable = merge->second.index < merge->second.page.size();
+            if (!firstAvailable && !secondAvailable &&
+                merge->first.exhausted && merge->second.exhausted) {
+                finish();
+                return;
+            }
+
+            QJsonValue item;
+            if (!firstAvailable) {
+                item = merge->second.page.at(merge->second.index++);
+            } else if (!secondAvailable) {
+                item = merge->first.page.at(merge->first.index++);
+            } else if (before(merge->first.page.at(merge->first.index),
+                              merge->second.page.at(merge->second.index))) {
+                item = merge->first.page.at(merge->first.index++);
+            } else {
+                item = merge->second.page.at(merge->second.index++);
+            }
+
+            const QString id = item.toObject().value("id").toString();
+            if (id.isEmpty() || !merge->ids.contains(id)) {
+                if (!id.isEmpty()) merge->ids.insert(id);
+                if (merge->unique >= offset && merge->page.size() < limit) merge->page.append(item);
+                ++merge->unique;
+            }
+        }
+    };
+    merge->advance();
 }
 
 void AppService::detail(QString id)

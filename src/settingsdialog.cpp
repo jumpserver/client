@@ -1,4 +1,5 @@
 #include "settingsdialog.h"
+#include "replay/pluginsettings.h"
 #include "platform.h"
 #include "theme.h"
 #include <QApplication>
@@ -257,7 +258,7 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
       titleLabel->setText(translated);
       descriptionLabel->setText(text(descriptionZh, descriptionEn));
     });
-    const QStringList icons{"settings", "palette", "desktop", "app", "info"};
+    const QStringList icons{"settings", "palette", "desktop", "app", "plugin", "info"};
     item->setIcon(ClientTheme::icon(icons.value(navigation->count() - 1)));
     item->setSizeHint(QSize(140, 40));
     item->setToolTip(title);
@@ -591,6 +592,11 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
   reloadApplications();
   auto *about = new QFrame;
   about->setObjectName("aboutSettings");
+  auto *replayPlugin = new Replay::PluginSettings;
+  addPage(replayPlugin, "插件管理", "Plugin management",
+          "按需下载和管理客户端插件。", "Download and manage client plugins as needed.");
+  navigation->item(navigation->count() - 1)->setData(Qt::UserRole, "replayPlugin");
+  m_translations.append([replayPlugin] { replayPlugin->retranslate(); });
   auto *ab = new QVBoxLayout(about);
   ab->setContentsMargins(28, 32, 28, 32);
   ab->setSpacing(14);
@@ -643,6 +649,15 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
   connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
   footerLayout->addWidget(buttons);
   layout->addWidget(footer);
+}
+void SettingsDialog::selectReplayPlugin() {
+  auto *navigation = findChild<QListWidget *>("settingsNavigation");
+  for (int row = 0; row < navigation->count(); ++row) {
+    if (navigation->item(row)->data(Qt::UserRole).toString() == QLatin1String("replayPlugin")) {
+      navigation->setCurrentRow(row);
+      break;
+    }
+  }
 }
 void SettingsDialog::retranslateUi() {
   setWindowTitle(text("设置", "Settings"));

@@ -23,21 +23,7 @@ void NetworkWorker::send(QNetworkRequest request, QByteArray method, QByteArray 
 {
     if ((!independent && generation < m_generation) || QThread::currentThread()->isInterruptionRequested()) return;
     QString failure;
-    QList<QNetworkProxy> proxies;
-    if (mode == "system") {
-        proxies = SystemProxy::resolve(request.url(), &failure);
-    } else if (mode == "manual") {
-        const QUrl url(address.contains("://") ? address : "http://" + address);
-        if (!url.isValid() || url.scheme() != "http" || url.host().isEmpty() ||
-            !url.userInfo().isEmpty() || url.port(8080) <= 0 ||
-            (url.path() != "" && url.path() != "/") || url.hasQuery() || url.hasFragment()) {
-            failure = tr("代理地址无效，请填写 HTTP 代理主机和端口");
-        } else {
-            proxies.append(QNetworkProxy(QNetworkProxy::HttpProxy, url.host(), quint16(url.port(8080))));
-        }
-    } else {
-        proxies.append(QNetworkProxy(QNetworkProxy::NoProxy));
-    }
+    const auto proxies = resolveClientProxies(request.url(), mode, address, &failure);
     if (!failure.isEmpty() || proxies.isEmpty()) {
         NetworkResult result;
         result.failure = failure.isEmpty() ? tr("系统代理解析失败，请检查代理配置") : failure;

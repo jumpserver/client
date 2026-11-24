@@ -1,7 +1,7 @@
 package logger
 
 import (
-	"go-client/pkg/config"
+	"go-client/pkg/appdata"
 	"os"
 	"path/filepath"
 	"time"
@@ -45,8 +45,7 @@ func getEncoder() zapcore.Encoder {
 }
 
 func getLogWriter() zapcore.WriteSyncer {
-	dir, _ := os.UserConfigDir()
-	logDir := filepath.Join(dir, config.DirectoryName())
+	logDir, _ := appdata.Directory()
 	// 确保日志目录存在
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		// 如果创建目录失败，使用标准输出

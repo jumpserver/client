@@ -279,6 +279,23 @@ QList<QNetworkProxy> SystemProxy::resolve(const QUrl &url, QString *failure)
 #endif
 }
 
+QList<QNetworkProxy> resolveClientProxies(const QUrl &url, const QString &mode,
+                                          const QString &address, QString *failure) {
+    if (failure) failure->clear();
+    if (mode == "system") return SystemProxy::resolve(url, failure);
+    if (mode == "manual") {
+        const QUrl proxy(address.contains("://") ? address : "http://" + address);
+        if (!proxy.isValid() || proxy.scheme() != "http" || proxy.host().isEmpty() ||
+            !proxy.userInfo().isEmpty() || proxy.port(8080) <= 0 ||
+            (proxy.path() != "" && proxy.path() != "/") || proxy.hasQuery() || proxy.hasFragment()) {
+            if (failure) *failure = QObject::tr("代理地址无效，请填写 HTTP 代理主机和端口");
+            return {};
+        }
+        return {QNetworkProxy(QNetworkProxy::HttpProxy, proxy.host(), quint16(proxy.port(8080)))};
+    }
+    return {QNetworkProxy(QNetworkProxy::NoProxy)};
+}
+
 QByteArray CredentialStore::read(const QString &key, QString *error) {
     setError(error, {});
 #ifdef Q_OS_MACOS
@@ -397,6 +414,10 @@ QString ConfigStore::platformKey() {
     return QStringLiteral("linux");
 #endif
 }
+QString ConfigStore::applicationDataName(const QString &displayName) {
+    const QString name = displayName.isEmpty() ? QGuiApplication::applicationDisplayName() : displayName;
+    return name == QLatin1String("OSMClient") ? QStringLiteral("osm-client") : QStringLiteral("jumpserver-client");
+}
 QString ConfigStore::configPath() {
 #ifdef Q_OS_MACOS
     const QString root = QDir::homePath() + QStringLiteral("/Library/Application Support");
@@ -405,9 +426,10 @@ QString ConfigStore::configPath() {
 #else
     const QString root = qEnvironmentVariable("XDG_CONFIG_HOME", QDir::homePath() + QStringLiteral("/.config"));
 #endif
-    const QString directory = QGuiApplication::applicationDisplayName() == QLatin1String("OSMClient")
-        ? QStringLiteral("osm-client") : QStringLiteral("jumpserver-client");
-    return QDir(root).filePath(directory + QStringLiteral("/config.json"));
+    return QDir(root).filePath(applicationDataName() + QStringLiteral("/config.json"));
+}
+QString ConfigStore::configDirectory() {
+    return QFileInfo(configPath()).absolutePath();
 }
 QJsonObject ConfigStore::merge(const QJsonObject &user, const QJsonObject &defaults) {
     QJsonObject result = defaults;
@@ -595,7 +617,7 @@ void Launcher::launch(const QString &url) {
     if (executable.isEmpty()) { emit failed(tr("未找到当前平台的协议启动器，请先构建或安装完整资源包")); return; }
     auto process = new QProcess(this);
     auto environment = QProcessEnvironment::systemEnvironment();
-    environment.insert(QStringLiteral("OSMCLIENT_APP_NAME"), QGuiApplication::applicationDisplayName());
+    environment.insert(QStringLiteral("CLIENT_APP_DATA_NAME"), ConfigStore::applicationDataName());
     process->setProcessEnvironment(environment);
     process->setProgram(executable);
     process->setArguments({url});

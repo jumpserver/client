@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-client/global"
+	"go-client/pkg/appdata"
 	"go-client/pkg/autoit"
 	"go-client/pkg/config"
 	"io/ioutil"
@@ -196,12 +197,11 @@ func handleVNC(r *Rouse, cfg *config.AppConfig) *exec.Cmd {
 }
 
 func handleRealVNC(r *Rouse, appItem *config.AppItem) *exec.Cmd {
-	dir, err := os.UserConfigDir()
+	dir, err := appdata.Directory()
 	if err != nil {
 		reportErrorf("Failed to locate RealVNC config directory: %v", err)
 		return nil
 	}
-	dir = filepath.Join(dir, config.DirectoryName())
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		reportErrorf("Failed to create RealVNC config directory: %v", err)
 		return nil
@@ -379,8 +379,7 @@ func handleDB(r *Rouse, cfg *config.AppConfig) *exec.Cmd {
 		conList = append(conList, ss)
 
 		bjson, _ := json.Marshal(conList)
-		dir, _ := os.UserConfigDir()
-		currentPath := filepath.Join(dir, config.DirectoryName())
+		currentPath, _ := appdata.Directory()
 		rdmPath := filepath.Join(currentPath, ".rdm")
 		EnsureDirExist(rdmPath)
 		filePath := filepath.Join(rdmPath, "connections.json")

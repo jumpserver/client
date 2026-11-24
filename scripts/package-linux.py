@@ -10,6 +10,7 @@ import shutil
 import struct
 import subprocess
 import sys
+from replay_payload import FFMPEG
 
 
 ARCHITECTURES = {
@@ -36,6 +37,44 @@ def require_elf(path, machine):
         raise RuntimeError('Executable architecture does not match the package build host: {}'.format(path))
     if not os.access(str(path), os.X_OK):
         raise RuntimeError('Executable permission is missing: {}'.format(path))
+
+
+def ar_members(path):
+    """Return member names from a Unix ar archive without external tools."""
+    with path.open('rb') as stream:
+        if stream.read(8) != b'!<arch>\n':
+            raise RuntimeError('Expected a Unix ar archive: {}'.format(path))
+        while True:
+            header = stream.read(60)
+            if not header:
+                return
+            if len(header) != 60 or header[58:60] != b'`\n':
+                raise RuntimeError('Invalid ar member header: {}'.format(path))
+            name = header[:16].decode('ascii').rstrip()
+            if name.endswith('/'):
+                name = name[:-1]
+            try:
+                size = int(header[48:58].decode('ascii').strip())
+            except ValueError as exc:
+                raise RuntimeError('Invalid ar member size: {}'.format(path)) from exc
+            yield name
+            stream.seek(size + (size & 1), os.SEEK_CUR)
+
+
+def package_compression(path, package_format):
+    if package_format == 'deb':
+        data_members = [name for name in ar_members(path)
+                        if name.startswith('data.tar.')]
+        if len(data_members) != 1:
+            raise RuntimeError('Expected exactly one DEB data archive, found: {}'.format(data_members))
+        compression = data_members[0][len('data.tar.'):]
+    else:
+        compression = subprocess.check_output(
+            ['rpm', '-qp', '--qf', '%{PAYLOADCOMPRESSOR}', str(path)],
+            universal_newlines=True).strip()
+    if compression != 'xz':
+        raise RuntimeError('Package compression must be xz, found: {}'.format(compression))
+    return compression
 
 
 def main():
@@ -113,6 +152,7 @@ def main():
     if len(packages) != 1:
         raise RuntimeError('Expected one native package, found {}'.format(len(packages)))
     package = packages[0]
+    compression = package_compression(package, args.format)
     if args.format == 'deb':
         metadata = subprocess.check_output(['dpkg-deb', '--info', str(package)], universal_newlines=True)
         contents = subprocess.check_output(['dpkg-deb', '--contents', str(package)], universal_newlines=True)
@@ -126,6 +166,8 @@ def main():
         if expected not in contents:
             raise RuntimeError('Package payload is incomplete: ' + expected)
     for line in contents.splitlines():
+        if line.split() and FFMPEG.search(Path(line.split()[-1]).name):
+            raise RuntimeError('FFmpeg binaries must be downloaded by the replay plugin, not shipped in the installer')
         permissions = line.split()[0] if line.split() else ''
         if len(permissions) == 10 and permissions[0] == 'd' and permissions[8] == 'w':
             raise RuntimeError('Package contains a world-writable directory: ' + line)
@@ -134,6 +176,7 @@ def main():
     (output / (package.name + '.metadata.txt')).write_text(metadata + '\n' + contents)
     manifest = {'package': package.name, 'format': args.format, 'architecture': goarch,
                 'sha256': hashlib.sha256(package.read_bytes()).hexdigest(),
+                'compression': compression,
                 'distribution': Path('/etc/os-release').read_text(), 'qt_major': args.qt_major,
                 'qt_version': subprocess.check_output(['pkg-config', '--modversion', 'Qt' + args.qt_major + 'Core'], universal_newlines=True).strip(),
                 'signed': False}

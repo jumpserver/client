@@ -20,6 +20,7 @@ class QTableWidget;
 class QTimer;
 class QCheckBox;
 class QMenu;
+namespace Replay { class Window; class TranscodeWindow; }
 class MainWindow : public QMainWindow {
   Q_OBJECT
 public:
@@ -38,6 +39,9 @@ protected:
 private:
   enum class ConnectionProgress { Idle, Permissions, Connecting, Launching };
   void buildUi();
+  void openSettings(bool replayPlugin);
+  void showOfflineReplay(const QString &path = {});
+  void showReplayTranscode();
   void retranslateUi();
   void login();
   void refresh(bool reset = false);
@@ -64,6 +68,8 @@ private:
   ConfigStore *m_config;
   Launcher *m_launcher;
   QDialog *m_approvalDialog = nullptr;
+  Replay::Window *m_replayWindow = nullptr;
+  Replay::TranscodeWindow *m_transcodeWindow = nullptr;
   QListWidget *m_categories, *m_grid;
   QTableWidget *m_table;
   QLineEdit *m_search;

@@ -17,7 +17,7 @@ gpgcheck=1
 gpgkey=https://www.centos.org/keys/RPM-GPG-KEY-CentOS-Official
 EOF
 
-dnf install -y gcc-c++ cmake make python39 libsecret-devel rpm-build desktop-file-utils xdg-utils pkgconf-pkg-config file
+dnf install -y gcc-c++ cmake make python39 zlib-devel libsecret-devel rpm-build desktop-file-utils xdg-utils pkgconf-pkg-config file
 dnf install -y --disablerepo='*' --enablerepo=centos-qt511-base --enablerepo=centos-qt511-app \
-  qt5-qtbase-devel-5.11.1-5.el8 qt5-qtsvg-devel-5.11.1-2.el8
+  qt5-qtbase-devel-5.11.1-5.el8 qt5-qtsvg-devel-5.11.1-2.el8 qt5-qtmultimedia-devel-5.11.1
 test "$(pkg-config --modversion Qt5Core)" = 5.11.1

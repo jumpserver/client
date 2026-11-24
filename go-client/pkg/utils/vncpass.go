@@ -3,7 +3,7 @@ package vncpass
 import (
 	"bytes"
 	"crypto/des"
-	"go-client/pkg/config"
+	"go-client/pkg/appdata"
 	"os"
 	"path/filepath"
 )
@@ -41,12 +41,10 @@ func padPassword(pw string) []byte {
 
 // 生成 .vncpass 文件并返回路径
 func GenerateVNCPasswordFile(password string) (string, error) {
-	// 获取用户配置目录
-	configDir, err := os.UserConfigDir()
+	currentPath, err := appdata.Directory()
 	if err != nil {
 		return "", err
 	}
-	currentPath := filepath.Join(configDir, config.DirectoryName())
 
 	// 确保目录存在
 	err = os.MkdirAll(currentPath, os.ModePerm)
