@@ -1,4 +1,5 @@
 #include "platform.h"
+#include "protocollog.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -609,12 +610,13 @@ QString Launcher::executablePath() {
     return {};
 }
 void Launcher::launch(const QString &url) {
-    if (!isConnectionUrl(url)) { emit failed(tr("无效的客户端连接地址")); return; }
+    protocolLog("Launcher invoked");
+    if (!isConnectionUrl(url)) { protocolLog("Launcher rejected connection URL"); emit failed(tr("无效的客户端连接地址")); return; }
     ConfigStore config(nullptr, config_);
     config.applications();
-    if (!config.error().isEmpty()) { emit failed(config.error()); return; }
+    if (!config.error().isEmpty()) { protocolLog("Launcher configuration failed"); emit failed(config.error()); return; }
     const QString executable = executable_.isEmpty() ? executablePath() : executable_;
-    if (executable.isEmpty()) { emit failed(tr("未找到当前平台的协议启动器，请先构建或安装完整资源包")); return; }
+    if (executable.isEmpty()) { protocolLog("Launcher executable not found"); emit failed(tr("未找到当前平台的协议启动器，请先构建或安装完整资源包")); return; }
     auto process = new QProcess(this);
     auto environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("CLIENT_APP_DATA_NAME"), ConfigStore::applicationDataName());
@@ -631,19 +633,22 @@ void Launcher::launch(const QString &url) {
         const QByteArray lower = buffer->toLower();
         if (!*reported && (lower.contains("error:") || lower.contains("failed") || lower.contains("not configured"))) {
             *reported = true;
+            protocolLog("Launcher reported an error on stderr");
             emit failed(tr("协议启动器报告错误，请检查对应客户端的安装路径与配置"));
         }
         if (buffer->size() > 4096) *buffer = buffer->right(4096);
     };
     connect(process, &QProcess::readyReadStandardError, this, drain);
     connect(process, &QProcess::readyReadStandardOutput, this, [process]() { process->readAllStandardOutput(); });
-    connect(process, &QProcess::started, this, &Launcher::started);
+    connect(process, &QProcess::started, this, [this] { protocolLog("Launcher process started"); emit started(); });
     connect(process, &QProcess::errorOccurred, this, [this, process, reported](QProcess::ProcessError failure) {
+        protocolLog("Launcher process error");
         if (!*reported) { *reported = true; emit failed(tr("无法运行协议启动器")); }
         if (failure == QProcess::FailedToStart) { emit finished(); process->deleteLater(); }
     });
     connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this, process, reported, drain](int code, QProcess::ExitStatus exitStatus) {
+        protocolLog(code == 0 && exitStatus == QProcess::NormalExit ? "Launcher process exited successfully" : "Launcher process exited with failure");
         drain();
         if (!*reported && (code != 0 || exitStatus == QProcess::CrashExit)) emit failed(tr("协议启动器异常退出（%1）").arg(code));
         emit finished(); process->deleteLater();

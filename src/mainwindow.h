@@ -35,6 +35,7 @@ signals:
 protected:
   void closeEvent(QCloseEvent *) override;
   void changeEvent(QEvent *) override;
+  void showEvent(QShowEvent *) override;
 
 private:
   enum class ConnectionProgress { Idle, Permissions, Connecting, Launching };
@@ -42,6 +43,8 @@ private:
   void openSettings(bool replayPlugin);
   void showOfflineReplay(const QString &path = {});
   void showReplayTranscode();
+  void showFeatureGuide(bool automatic = false);
+  void showAssetGuide(bool automatic = false);
   void retranslateUi();
   void login();
   void refresh(bool reset = false);
@@ -68,6 +71,7 @@ private:
   ConfigStore *m_config;
   Launcher *m_launcher;
   QDialog *m_approvalDialog = nullptr;
+  QWidget *m_featureGuide = nullptr;
   Replay::Window *m_replayWindow = nullptr;
   Replay::TranscodeWindow *m_transcodeWindow = nullptr;
   QListWidget *m_categories, *m_grid;
@@ -85,7 +89,7 @@ private:
       *m_welcome, *m_catalogLabel, *m_loginSubtitle, *m_siteLabel, *m_loginHint;
   QPushButton *m_loginButton, *m_cancelLogin, *m_logout, *m_settingsButton,
       *m_connectButton, *m_refreshButton, *m_layoutButton, *m_previous, *m_next,
-      *m_collapse, *m_switcher, *m_reopen, *m_copyLogin, *m_sortButton;
+      *m_collapse, *m_switcher, *m_reopen, *m_copyLogin, *m_sortButton, *m_guideButton;
   QTimer *m_searchTimer;
   QJsonArray m_assets;
   QJsonObject m_methods, m_profileData, m_publicSettings;

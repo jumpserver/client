@@ -75,6 +75,8 @@ Linux 安装对应发行版的 Qt 5 开发包、QtSvg、编译工具和 `libsecr
 
 Qt 的界面设置存于 `FIT2CLOUD/client` 的平台设置位置。应用显示名称为 `OSMClient` 时，Qt 和 Go 启动器共用 `osm-client/config.json`；其他名称使用 `jumpserver-client/config.json`。新配置不存在时，优先复制有效的旧配置，无法读取或复制时使用默认配置；旧文件保留。配置合并保留已有应用路径/偏好，损坏的配置报错且不覆盖。
 
+协议唤起的诊断日志写入用户配置目录下的 `osm-client/protocol.log`（macOS 为 `~/Library/Application Support/osm-client/protocol.log`）。日志记录事件和启动阶段，不记录连接地址或令牌。
+
 界面、系统应用显示名与安装器统一为 `OSMClient`。源码目录仍为 `client-qt`，构建目标、安装路径、安装文件名及配置/凭据命名空间统一为 `client`；旧 `client-qt` 命名空间不会自动迁移。
 
 登录 token 与手工输入凭据保存在 macOS Keychain、Windows Credential Manager 或 Linux Secret Service。Qt 登录状态不导入原 Tauri 的凭据；首次使用需要登录。连接偏好按站点、用户、组织及资产隔离。

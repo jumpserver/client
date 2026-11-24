@@ -383,15 +383,15 @@ struct Window::Private {
     });
     QObject::connect(play, &QPushButton::clicked, w, [this] { toggle(); });
     QObject::connect(seek, &QSlider::sliderPressed, w, [this] {
+      resumeAfterDrag = source && !isMp4() && (playing || resumeAfterSeek);
       resumeAfterSeek = false;
-      resumeAfterDrag = source && source->kind == Kind::Guacamole && playing;
       if (!isMp4()) pause();
     });
     QObject::connect(seek, &QSlider::valueChanged, w, [this](int ms) {
       if (!updating && !seek->isSliderDown()) seekTo(ms);
     });
     QObject::connect(seek, &QSlider::sliderReleased, w, [this] {
-      resumeAfterSeek = resumeAfterDrag && source && source->kind == Kind::Guacamole;
+      resumeAfterSeek = resumeAfterDrag && source && !isMp4();
       resumeAfterDrag = false;
       seekTo(seek->value());
     });
@@ -580,6 +580,7 @@ struct Window::Private {
     setPosition(target);
     if (isMp4()) { ensureMedia(); player->setPosition(target); return; }
     if (source) {
+      resumeAfterSeek = playing || resumeAfterSeek;
       pendingSeek = target;
       seekLoadingClock.restart();
       w->setProperty("replaySeekPending", true);

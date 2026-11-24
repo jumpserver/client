@@ -1,6 +1,7 @@
 #include "appservice.h"
 #include "mainwindow.h"
 #include "platform.h"
+#include "protocollog.h"
 #include "replay/localization.h"
 #include "theme.h"
 #ifdef Q_OS_MACOS
@@ -50,12 +51,14 @@ public:
     std::function<void()> onActivate;
     QStringList queued;
     void receiveUrl(const QString &url) {
+        protocolLog(openUrl ? "URL received: routing" : "URL received: queued");
         if (openUrl) openUrl(url); else queued.append(url);
     }
     bool event(QEvent *event) override {
         if (event->type() == QEvent::ApplicationActivate && onActivate)
             onActivate();
         if (event->type() == QEvent::FileOpen) {
+            protocolLog("Qt FileOpen event received");
             const QUrl url = static_cast<QFileOpenEvent *>(event)->url();
             // Opaque JMS payloads must never be round-tripped through QUrl.
             // On macOS protocol_events.mm receives the original AppleEvent text.
@@ -89,6 +92,7 @@ int main(int argc, char **argv)
     QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
 #endif
     ClientApplication app(argc, argv);
+    protocolLog("Application started");
 #ifdef Q_OS_MACOS
     installProtocolEventHandler([&app](const QString &url) { app.receiveUrl(url); });
 #endif
@@ -109,6 +113,7 @@ int main(int argc, char **argv)
     }
     SingleInstance instance(nullptr, smoke ? "client-smoke" : QString());
     if (!instance.start(app.arguments())) {
+        protocolLog(instance.error().isEmpty() ? "Existing instance notified" : "Single instance initialization failed");
         if (!instance.error().isEmpty()) {
             qCritical("Cannot start client instance");
             return 1;
@@ -138,6 +143,7 @@ int main(int argc, char **argv)
     };
 #endif
     auto route = [&window](const QString &url) {
+        protocolLog(url.startsWith("jms://", Qt::CaseInsensitive) ? "Routing JMS URL" : "Ignored non-JMS URL");
         if (url.startsWith("jms://", Qt::CaseInsensitive)) window.handleUrl(url);
     };
     app.openUrl = route;

@@ -101,6 +101,9 @@ struct ProtocolSection {
   QString icon;
   QList<QPair<QString, QString>> protocols;
 };
+bool isVisibleApplicationProtocol(const QString &protocol) {
+  return protocol.compare(QLatin1String("mongodb"), Qt::CaseInsensitive) != 0;
+}
 const QList<ProtocolSection> &protocolSections() {
   static const QList<ProtocolSection> sections{
       {QStringLiteral("terminal"), QStringLiteral("命令行终端"),
@@ -517,6 +520,8 @@ SettingsDialog::SettingsDialog(ConfigStore *config, const QJsonValue &version,
         platformApplications.value(section.category).toArray();
     QList<QPair<QString, QString>> protocols;
     for (const auto &entry : section.protocols) {
+      if (!isVisibleApplicationProtocol(entry.first))
+        continue;
       bool configured = false;
       for (const auto &value : items)
         configured |= supportsProtocol(value.toObject(), entry.first);
@@ -894,7 +899,8 @@ QWidget *SettingsDialog::applicationCard(const QJsonObject &item,
   badgeRow->addLayout(badges, 1);
   QStringList supported;
   for (const QJsonValue &value : item.value("protocol").toArray())
-    supported << value.toString().toUpper();
+    if (isVisibleApplicationProtocol(value.toString()))
+      supported << value.toString().toUpper();
   // Badge widths are measured with the font they render with, so the pills never
   // clip. Long protocol lists collapse into a "+N" pill that keeps the full list
   // in its tooltip, which also keeps narrow windows readable.

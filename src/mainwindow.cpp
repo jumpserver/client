@@ -14,6 +14,7 @@
 #include <QComboBox>
 #include <QDesktopServices>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QFrame>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -53,6 +54,135 @@
 #include <utility>
 using ClientTheme::text;
 namespace {
+class FeatureGuide : public QWidget {
+public:
+  FeatureGuide(QWidget *parent, QWidget *target, std::function<void()> skipped,
+               std::function<void()> next)
+      : QWidget(parent), m_target(target), m_highlight([this] {
+          return QRect(mapFromGlobal(m_target->mapToGlobal(QPoint())), m_target->size());
+        }) {
+    setObjectName("featureGuide");
+    setFocusPolicy(Qt::StrongFocus);
+    m_card = new QFrame(this);
+    m_card->setProperty("surface", true);
+    m_card->setFixedWidth(360);
+    auto *layout = new QVBoxLayout(m_card);
+    layout->setContentsMargins(22, 20, 22, 20);
+    layout->setSpacing(14);
+    m_progress = new QLabel;
+    m_progress->setProperty("muted", true);
+    layout->addWidget(m_progress);
+    m_title = new QLabel;
+    m_title->setProperty("role", "dialogTitle");
+    layout->addWidget(m_title);
+    m_description = new QLabel;
+    m_description->setWordWrap(true);
+    m_description->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+    layout->addWidget(m_description);
+    auto *buttons = new QHBoxLayout;
+    auto *skip = new QPushButton(text("跳过引导", "Skip guide"));
+    skip->setProperty("quiet", true);
+    m_next = new QPushButton;
+    m_next->setProperty("primary", true);
+    buttons->addWidget(skip);
+    buttons->addStretch();
+    buttons->addWidget(m_next);
+    layout->addLayout(buttons);
+    connect(skip, &QPushButton::clicked, this, [skipped] { skipped(); });
+    connect(m_next, &QPushButton::clicked, this, [next] { next(); });
+    parent->installEventFilter(this);
+    setGeometry(parent->rect());
+    positionCard();
+  }
+  void showAvatarMenuExample() {
+    m_menuExample = new QFrame(this);
+    m_menuExample->setObjectName("guideAvatarMenu");
+    m_menuExample->setProperty("surface", true);
+    auto *layout = new QVBoxLayout(m_menuExample);
+    layout->setContentsMargins(6, 6, 6, 6);
+    layout->setSpacing(2);
+    for (const auto &item : {qMakePair(QStringLiteral("clapperboard"), text("离线播放", "Offline playback")),
+                             qMakePair(QStringLiteral("replay-transcode"), text("录像转码", "Recording transcoding"))}) {
+      auto *label = new QLabel(m_menuExample);
+      label->setTextFormat(Qt::PlainText);
+      auto *row = new QHBoxLayout;
+      row->setContentsMargins(8, 6, 12, 6);
+      auto *icon = new QLabel;
+      icon->setPixmap(ClientTheme::icon(item.first).pixmap(16, 16));
+      label->setText(item.second);
+      row->addWidget(icon);
+      row->addSpacing(6);
+      row->addWidget(label);
+      row->addStretch();
+      layout->addLayout(row);
+    }
+    m_menuExample->setFixedWidth(178);
+    m_menuExample->adjustSize();
+    m_menuExample->show();
+    positionCard();
+  }
+  void setStep(int step, int total, const QString &title, const QString &description,
+               std::function<QRect()> highlight, bool last = false) {
+    if (highlight) m_highlight = std::move(highlight);
+    m_progress->setText(text("第 %1 / %2 步", "Step %1 / %2").arg(step).arg(total));
+    m_title->setText(title);
+    m_description->setText(description);
+    m_next->setText(last ? text("完成", "Finish") : text("下一步", "Next"));
+    positionCard();
+    update();
+  }
+protected:
+  bool eventFilter(QObject *watched, QEvent *event) override {
+    if (watched == parentWidget() && (event->type() == QEvent::Resize || event->type() == QEvent::LayoutRequest)) {
+      setGeometry(parentWidget()->rect());
+      positionCard();
+      update();
+    }
+    return QWidget::eventFilter(watched, event);
+  }
+  void paintEvent(QPaintEvent *) override {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+    QPainterPath shade;
+    shade.addRect(rect());
+    QPainterPath highlight;
+    highlight.addRoundedRect(QRectF(m_highlight()).adjusted(-5, -5, 5, 5), 10, 10);
+    painter.fillPath(shade.subtracted(highlight), QColor(0, 0, 0, 145));
+    painter.setPen(QPen(palette().color(QPalette::Highlight), 2));
+    painter.drawPath(highlight);
+  }
+private:
+  void positionCard() {
+    m_card->layout()->invalidate();
+    const int textWidth = m_card->width() - m_card->layout()->contentsMargins().left() - m_card->layout()->contentsMargins().right();
+    m_description->setFixedWidth(textWidth);
+    const int textHeight = m_description->fontMetrics().boundingRect(
+        QRect(0, 0, textWidth, 10000), Qt::TextWordWrap, m_description->text()).height();
+    m_description->setMinimumHeight(qMax(textHeight + 4, m_description->heightForWidth(textWidth)));
+    m_card->layout()->invalidate();
+    const int cardHeight = m_card->layout()->heightForWidth(m_card->width());
+    m_card->resize(m_card->width(), qMax(m_card->layout()->sizeHint().height(), cardHeight));
+    m_card->layout()->activate();
+    const QRect target = m_highlight();
+    QRect anchor = target;
+    if (m_menuExample) {
+      const int menuX = qBound(12, target.left(), qMax(12, width() - m_menuExample->width() - 12));
+      const int menuY = qMax(12, target.top() - m_menuExample->height() - 8);
+      m_menuExample->move(menuX, menuY);
+      anchor = m_menuExample->geometry();
+    }
+    const int x = qBound(12, anchor.right() + 18, qMax(12, width() - m_card->width() - 12));
+    const int y = qBound(12, anchor.bottom() - m_card->height(), qMax(12, height() - m_card->height() - 12));
+    m_card->move(x, y);
+  }
+  QWidget *m_target;
+  QFrame *m_card;
+  QFrame *m_menuExample = nullptr;
+  QLabel *m_progress, *m_title, *m_description;
+  QPushButton *m_next;
+  std::function<QRect()> m_highlight;
+};
+
 class SiteSwitcherButton : public QPushButton {
 public:
   using QPushButton::QPushButton;
@@ -595,6 +725,8 @@ MainWindow::MainWindow(AppService *service, ConfigStore *config,
             m_assets = assets;
             m_count = count;
             renderAssets();
+            if (!QCoreApplication::arguments().contains("--smoke-test"))
+              QTimer::singleShot(0, this, [this] { showAssetGuide(true); });
           });
   connect(service, &AppService::detailReady, this, &MainWindow::consumeDetails);
   connect(service, &AppService::favoriteFinished, this,
@@ -893,6 +1025,11 @@ void MainWindow::buildUi() {
     m_service->setOrg(m_organizations->itemData(index).toString());
     m_service->metadata();
     refresh(true);
+  });
+  m_guideButton = iconButton("info", "featureGuideButton");
+  top->addWidget(m_guideButton);
+  connect(m_guideButton, &QPushButton::clicked, this, [this] {
+    if (m_service->authenticated()) showAssetGuide(); else showFeatureGuide();
   });
   top->addStretch();
   m_switcher = new SiteSwitcherButton;
@@ -1239,6 +1376,7 @@ void MainWindow::retranslateUi() {
   m_search->setToolTip(text("搜索当前分类资产", "Search assets in this category") +
                       " · " + QKeySequence(QKeySequence::Find).toString(QKeySequence::NativeText));
   const QList<QPair<QPushButton *, QString>> tools{
+    {m_guideButton, text("功能引导", "Feature guide")},
     {m_settingsButton, text("设置", "Settings")},
     {m_logout, text("退出登录", "Sign out")},
     {m_refreshButton, text("刷新资产", "Refresh assets")},
@@ -1870,6 +2008,7 @@ void MainWindow::updateSessionUi() {
   if (m_restoring) m_content->setCurrentWidget(m_restorePage);
   else m_content->setCurrentIndex(active ? 1 : 0);
   m_switcher->setEnabled(!m_restoring);
+  m_guideButton->setEnabled(!m_restoring);
   m_settingsButton->setEnabled(!m_restoring);
   m_categories->setEnabled(active);
   m_search->setEnabled(active);
@@ -1892,6 +2031,9 @@ void MainWindow::updateSessionUi() {
   avatar->setAccessibleName(active ? m_profile->text() : text("账户与站点", "Account and sites"));
   avatar->setToolTip(avatar->accessibleName().toHtmlEscaped().replace('\n', "<br>") +
       "<br>" + text("点击打开录像工具", "Click for recording tools"));
+  if (!m_restoring && !active && isVisible() && !QCoreApplication::arguments().contains("--smoke-test") &&
+      !QSettings().value("guides/recordingSettingsV2", false).toBool())
+    QTimer::singleShot(0, this, [this] { showFeatureGuide(true); });
 }
 void MainWindow::updateLoginState() {
   const bool pending = m_service->loginPending();
@@ -1985,6 +2127,170 @@ void MainWindow::closeEvent(QCloseEvent *event) {
   }
   m_service->cancelLogin();
   QMainWindow::closeEvent(event);
+}
+void MainWindow::showEvent(QShowEvent *event) {
+  QMainWindow::showEvent(event);
+  if (!QCoreApplication::arguments().contains("--smoke-test"))
+    QTimer::singleShot(0, this, [this] { showFeatureGuide(true); });
+}
+void MainWindow::showFeatureGuide(bool automatic) {
+  if (m_featureGuide || m_restoring || m_service->authenticated() || !isVisible() ||
+      (automatic && QSettings().value("guides/recordingSettingsV2", false).toBool())) return;
+  auto *avatar = findChild<QPushButton *>("avatar");
+  if (!avatar || !avatar->isVisible()) return;
+  const auto finish = [this] {
+    QSettings().setValue("guides/recordingSettingsV2", true);
+    if (m_featureGuide) m_featureGuide->deleteLater();
+  };
+  const auto next = [this, finish] {
+    if (m_featureGuide) m_featureGuide->hide();
+    SettingsDialog dialog(m_config, m_version, this);
+    connect(&dialog, &SettingsDialog::preferencesChanged, this, [this] {
+      ClientTheme::apply();
+      retranslateUi();
+      m_service->applyProxy();
+      emit preferencesChanged();
+    });
+    auto *navigation = dialog.findChild<QListWidget *>("settingsNavigation");
+    auto step = std::make_shared<int>(0);
+    FeatureGuide *guide = nullptr;
+    const auto updateStep = [&dialog, &guide, navigation, step] {
+      static const int rows[] = {0, 1, 2, 3, 3, 3, 4, 5};
+      static const char *titlesZh[] = {"通用", "外观", "远程桌面", "本地应用", "选择协议", "配置客户端", "插件管理", "关于"};
+      static const char *titlesEn[] = {"General", "Appearance", "Remote desktop", "Applications", "Choose a protocol", "Configure a client", "Plugin management", "About"};
+      static const char *descriptionsZh[] = {
+        "设置语言、代理和窗口行为等通用选项。", "调整主题、字体和界面外观。",
+        "配置远程桌面的显示和设备重定向。", "选择各协议使用的本地客户端并设置安装路径。",
+        "在左侧选择连接协议，右侧会显示支持该协议的本地应用。",
+        "为已安装的应用选择程序路径，再打开开关设为当前协议的默认客户端。部分系统内置应用无需选择路径。",
+        "安装和管理录像转码所需的 FFmpeg 插件。", "查看客户端版本和相关信息。"};
+      static const char *descriptionsEn[] = {
+        "Configure language, proxy and window behavior.", "Adjust the theme, font and appearance.",
+        "Configure remote desktop display and device redirection.", "Choose local clients and application paths for each protocol.",
+        "Select a connection protocol on the left to see supported local applications.",
+        "Choose the installed application's path, then enable its switch to make it the default for this protocol. Some built-in applications need no path.",
+        "Install and manage the FFmpeg plugin used for recording transcoding.", "View the client version and related information."};
+      const int row = rows[*step];
+      navigation->setCurrentRow(row);
+      navigation->scrollToItem(navigation->item(row));
+      guide->setStep(*step + 2, 9, text(titlesZh[*step], titlesEn[*step]),
+                     text(descriptionsZh[*step], descriptionsEn[*step]),
+                     [&dialog, guide, navigation, step, row] {
+                       if (*step == 4 || *step == 5) {
+                         auto *target = dialog.findChild<QWidget *>(*step == 4 ? "applicationProtocols" : "applicationCardScroll");
+                         if (target && target->isVisible())
+                           return QRect(guide->mapFromGlobal(target->mapToGlobal(QPoint())), target->size());
+                       }
+                       const QRect item = navigation->visualItemRect(navigation->item(row));
+                       return QRect(guide->mapFromGlobal(navigation->viewport()->mapToGlobal(item.topLeft())), item.size());
+                     }, *step == 7);
+    };
+    guide = new FeatureGuide(&dialog, navigation, [&dialog, finish] {
+      finish();
+      dialog.accept();
+    }, [&dialog, step, &updateStep, finish] {
+      if (++*step >= 8) { finish(); dialog.accept(); }
+      else updateStep();
+    });
+    QTimer::singleShot(0, &dialog, [&dialog, guide, &updateStep] {
+      updateStep();
+      guide->setGeometry(dialog.rect());
+      guide->show();
+      guide->raise();
+      guide->setFocus();
+    });
+    dialog.exec();
+    if (m_featureGuide) m_featureGuide->deleteLater();
+    if (m_transcodeWindow) m_transcodeWindow->retranslate();
+  };
+  auto *guide = new FeatureGuide(centralWidget(), avatar, finish, next);
+  m_featureGuide = guide;
+  guide->showAvatarMenuExample();
+  guide->setStep(1, 9, text("录像工具", "Recording tools"),
+                 text("单击或右击头像，可打开离线播放和录像转码。无需登录即可使用。",
+                      "Click or right-click your avatar to open offline playback and recording transcoding. No sign-in is required."), {});
+  connect(m_featureGuide, &QObject::destroyed, this, [this] { m_featureGuide = nullptr; });
+  m_featureGuide->show();
+  m_featureGuide->raise();
+  m_featureGuide->setFocus();
+}
+void MainWindow::showAssetGuide(bool automatic) {
+  if (m_featureGuide || m_restoring || !m_service->authenticated() || !isVisible() ||
+      (automatic && (m_loading || m_assets.isEmpty() ||
+                     QSettings().value("guides/assetConnectionV1", false).toBool()))) return;
+  auto *target = m_views->isVisible() ? static_cast<QWidget *>(m_views) : static_cast<QWidget *>(m_empty);
+  auto step = std::make_shared<int>(0);
+  const auto finish = [this] {
+    QSettings().setValue("guides/assetConnectionV1", true);
+    if (m_featureGuide) m_featureGuide->deleteLater();
+  };
+  const auto showConnectionExample = [this, finish] {
+    if (m_featureGuide) m_featureGuide->hide();
+    const QJsonObject asset{{"id", "guide-example"}, {"name", text("示例资产", "Example asset")}};
+    const QJsonObject details{
+      {"permed_protocols", QJsonArray{QJsonObject{{"name", "ssh"}}}},
+      {"permed_accounts", QJsonArray{QJsonObject{{"id", "@INPUT"}, {"alias", "@INPUT"}}}}};
+    const QJsonObject methods{{"ssh", QJsonArray{QJsonObject{{"type", "native"}, {"value", "ssh_client"}, {"label", "SSH Client"}}}}};
+    ConnectionDialog dialog(asset, details, methods, QStringLiteral("guide-example"), false, true, "ssh", this);
+    dialog.setWindowTitle(text("连接设置示例", "Connection settings example"));
+    auto *form = dialog.findChild<QWidget *>("connectionForm");
+    auto *buttons = dialog.findChild<QDialogButtonBox *>();
+    auto *save = buttons ? buttons->button(QDialogButtonBox::Ok) : nullptr;
+    auto step = std::make_shared<int>(0);
+    FeatureGuide *overlay = nullptr;
+    const auto update = [&overlay, form, save, step] {
+      QWidget *target = *step == 0 ? form : static_cast<QWidget *>(save);
+      overlay->setStep(*step + 3, 4,
+          *step == 0 ? text("保存连接设置", "Save connection settings") : text("连接资产", "Connect an asset"),
+          *step == 0
+              ? text("在此选择协议、账号和连接方式；实际编辑时点击“保存”应用设置。这里仅为示例，不会保存。", "Choose a protocol, account and connection method. In the real editor, select Save; this example does not save changes.")
+              : text("完成设置后，可双击资产或点击“连接”启动客户端。此示例不会发起连接。", "After configuring an asset, double-click it or select Connect to launch the client. This example does not connect."),
+          [overlay, target] { return QRect(overlay->mapFromGlobal(target->mapToGlobal(QPoint())), target->size()); }, *step == 1);
+    };
+    if (!form || !save) { finish(); return; }
+    form->setEnabled(false);
+    buttons->setEnabled(false);
+    overlay = new FeatureGuide(&dialog, form, [&dialog, finish] { finish(); dialog.reject(); },
+      [&dialog, step, &update, finish] { if (++*step >= 2) { finish(); dialog.reject(); } else update(); });
+    QTimer::singleShot(0, &dialog, [&dialog, overlay, &update] {
+      update();
+      overlay->setGeometry(dialog.rect());
+      overlay->show();
+      overlay->raise();
+      overlay->setFocus();
+    });
+    dialog.exec();
+    if (m_featureGuide) m_featureGuide->deleteLater();
+  };
+  auto guide = std::make_shared<FeatureGuide *>(nullptr);
+  const auto updateStep = [this, step, target, guide] {
+    static const char *titlesZh[] = {"搜索资产", "编辑连接", "保存连接设置", "连接资产"};
+    static const char *titlesEn[] = {"Search assets", "Edit a connection", "Save connection settings", "Connect an asset"};
+    static const char *descriptionsZh[] = {
+      "在左侧搜索框输入资产名称或地址，快速查找当前分类中的资产。",
+      "右击资产并选择“编辑连接”，调整协议、账号和连接方式。",
+      "在编辑连接窗口点击“保存”，下次连接将使用保存的设置；手动凭据仅在允许并勾选记住密码时保存。",
+      "双击资产，或选择资产后点击连接；也可通过右键菜单选择协议。"};
+    static const char *descriptionsEn[] = {
+      "Enter an asset name or address in the search box to find assets in the current category.",
+      "Right-click an asset and choose Edit connection to change its protocol, account and connection method.",
+      "Select Save in the connection editor to reuse these settings. Manual credentials are saved only when allowed and Remember password is selected.",
+      "Double-click an asset or select it and click Connect. You can also choose a protocol from its context menu."};
+    QWidget *highlight = *step == 0 && m_search->isVisible() ? static_cast<QWidget *>(m_search) : target;
+    (*guide)->setStep(*step + 1, 4, text(titlesZh[*step], titlesEn[*step]),
+                   text(descriptionsZh[*step], descriptionsEn[*step]),
+                   [guide, highlight] { return QRect((*guide)->mapFromGlobal(highlight->mapToGlobal(QPoint())), highlight->size()); },
+                   *step == 3);
+  };
+  *guide = new FeatureGuide(centralWidget(), target, finish, [step, updateStep, showConnectionExample] {
+    if (++*step == 2) showConnectionExample(); else updateStep();
+  });
+  m_featureGuide = *guide;
+  updateStep();
+  connect(*guide, &QObject::destroyed, this, [this] { m_featureGuide = nullptr; });
+  (*guide)->show();
+  (*guide)->raise();
+  (*guide)->setFocus();
 }
 void MainWindow::changeEvent(QEvent *event) {
   QMainWindow::changeEvent(event);
