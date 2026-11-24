@@ -104,6 +104,7 @@ private:
     QString credentialKey() const;
     bool configureSite(QString site);
     void resetSession();
+    void endSession(const QString &message);
     bool checkSessionExpiry();
     void scheduleSessionExpiry();
     void setLoginPending(bool pending);

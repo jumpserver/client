@@ -19,11 +19,12 @@ public:
     using Completion = std::function<void(NetworkResult)>;
     explicit NetworkWorker(QObject *parent = nullptr);
     void send(QNetworkRequest request, QByteArray method, QByteArray body,
-              QString mode, QString address, quint64 generation, Completion completion);
+              QString mode, QString address, quint64 generation, Completion completion,
+              bool independent = false);
     void cancelBefore(quint64 generation);
 private:
     void sendResolved(QNetworkRequest request, QByteArray method, QByteArray body,
                       QList<QNetworkProxy> proxies, quint64 generation,
-                      Completion completion, QDeadlineTimer deadline);
+                      Completion completion, QDeadlineTimer deadline, bool independent);
     quint64 m_generation = 0;
 };

@@ -277,11 +277,7 @@ bool AppService::checkSessionExpiry()
 {
     if (m_access.isEmpty() || m_refreshExpiresAt <= 0 ||
         QDateTime::currentSecsSinceEpoch() < m_refreshExpiresAt) return false;
-    QString failure;
-    if (m_persistCredentials) CredentialStore::remove(credentialKey(), &failure);
-    resetSession();
-    emit loggedOut();
-    emit status(tr("登录已过期，请重新登录"));
+    endSession(tr("登录已过期，请重新登录"));
     return true;
 }
 
@@ -506,16 +502,37 @@ void AppService::loadIdentity()
 
 void AppService::logout()
 {
+    endSession(tr("已退出登录"));
+}
+
+void AppService::endSession(const QString &message)
+{
     QUrlQuery body;
     addQueryItem(body, "client_id", m_clientId);
     addQueryItem(body, "token", m_refresh.isEmpty() ? m_access : m_refresh);
     addQueryItem(body, "token_type_hint", m_refresh.isEmpty() ? "access_token" : "refresh_token");
     const bool revoke = !m_access.isEmpty() || !m_refresh.isEmpty();
+    QNetworkRequest revokeRequest(QUrl(m_site + oauthRoot + "revoke/"));
+    revokeRequest.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    revokeRequest.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
+    const auto revokeBody = form(body);
+    const auto mode = m_proxyMode;
+    const auto address = m_proxyAddress;
     QString failure;
     if (m_persistCredentials) CredentialStore::remove(credentialKey(), &failure);
-    resetSession(); emit loggedOut(); emit status(tr("已退出登录"));
-    if (revoke) request("POST", oauthRoot + "revoke/", {}, form(body), "application/x-www-form-urlencoded", false,
-        [this](QJsonValue, QString e, int) { if (!e.isEmpty()) emit status(tr("本地登录已清除；服务端令牌撤销失败")); });
+    resetSession();
+    if (revoke) {
+        auto *worker = m_worker;
+        const auto generation = m_generation;
+        QMetaObject::invokeMethod(worker, [worker, revokeRequest, revokeBody, mode, address, generation] {
+            worker->send(revokeRequest, "POST", revokeBody, mode, address, generation,
+                [](NetworkResult result) {
+                    if (!result.failure.isEmpty() || result.error != QNetworkReply::NoError || result.status < 200 || result.status >= 300)
+                        qWarning("OAuth token revocation failed (HTTP %d, network error %d)", result.status, int(result.error));
+                }, true);
+        }, Qt::QueuedConnection);
+    }
+    emit loggedOut(); emit status(message);
 }
 
 void AppService::setOrg(QString org)

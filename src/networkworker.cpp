@@ -13,15 +13,15 @@ void NetworkWorker::cancelBefore(quint64 generation)
     m_generation = generation;
     const auto replies = findChildren<QNetworkReply *>();
     for (auto *reply : replies) {
-        if (reply->property("generation").toULongLong() < generation)
+        if (!reply->property("independent").toBool() && reply->property("generation").toULongLong() < generation)
             reply->abort();
     }
 }
 
 void NetworkWorker::send(QNetworkRequest request, QByteArray method, QByteArray body,
-                         QString mode, QString address, quint64 generation, Completion completion)
+                         QString mode, QString address, quint64 generation, Completion completion, bool independent)
 {
-    if (generation < m_generation || QThread::currentThread()->isInterruptionRequested()) return;
+    if ((!independent && generation < m_generation) || QThread::currentThread()->isInterruptionRequested()) return;
     QString failure;
     QList<QNetworkProxy> proxies;
     if (mode == "system") {
@@ -45,12 +45,12 @@ void NetworkWorker::send(QNetworkRequest request, QByteArray method, QByteArray 
         return;
     }
     sendResolved(request, method, body, proxies, generation, std::move(completion),
-                 QDeadlineTimer(30000));
+                 QDeadlineTimer(30000), independent);
 }
 
 void NetworkWorker::sendResolved(QNetworkRequest request, QByteArray method, QByteArray body,
                                  QList<QNetworkProxy> proxies, quint64 generation,
-                                 Completion completion, QDeadlineTimer deadline)
+                                 Completion completion, QDeadlineTimer deadline, bool independent)
 {
     if (QThread::currentThread()->isInterruptionRequested()) return;
     auto *manager = new QNetworkAccessManager(this);
@@ -60,6 +60,7 @@ void NetworkWorker::sendResolved(QNetworkRequest request, QByteArray method, QBy
     auto *reply = method == "GET" ? manager->get(request)
                                   : manager->sendCustomRequest(request, method, body);
     reply->setProperty("generation", QVariant::fromValue(generation));
+    reply->setProperty("independent", independent);
     auto *timer = new QTimer(reply);
     timer->setSingleShot(true);
     timer->start(int(qMax(qint64(1), deadline.remainingTime())));
@@ -77,7 +78,7 @@ void NetworkWorker::sendResolved(QNetworkRequest request, QByteArray method, QBy
         }
     });
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply, manager, generation, completion, responseBody, request, method, body, proxies, deadline] {
+            [this, reply, manager, generation, completion, responseBody, request, method, body, proxies, deadline, independent] {
         NetworkResult result;
         result.status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         result.error = reply->error();
@@ -86,13 +87,13 @@ void NetworkWorker::sendResolved(QNetworkRequest request, QByteArray method, QBy
         if (reply->property("timedOut").toBool()) result.failure = tr("网络请求超时，请检查网络与代理服务");
         if (reply->property("oversized").toBool()) result.failure = tr("站点响应超过大小限制");
         manager->deleteLater();
-        if (generation < m_generation) return;
+        if (!independent && generation < m_generation) return;
         const bool proxyFailure = result.error >= QNetworkReply::ProxyConnectionRefusedError &&
                                   result.error <= QNetworkReply::UnknownProxyError &&
                                   result.error != QNetworkReply::ProxyAuthenticationRequiredError;
         if (method == "GET" && proxyFailure && result.status == 0 && result.body.isEmpty() &&
             result.failure.isEmpty() && !proxies.isEmpty() && !deadline.hasExpired()) {
-            sendResolved(request, method, body, proxies, generation, completion, deadline);
+            sendResolved(request, method, body, proxies, generation, completion, deadline, independent);
             return;
         }
         completion(result);
