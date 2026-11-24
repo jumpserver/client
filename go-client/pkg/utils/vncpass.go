@@ -3,6 +3,7 @@ package vncpass
 import (
 	"bytes"
 	"crypto/des"
+	"go-client/pkg/config"
 	"os"
 	"path/filepath"
 )
@@ -40,12 +41,12 @@ func padPassword(pw string) []byte {
 
 // 生成 .vncpass 文件并返回路径
 func GenerateVNCPasswordFile(password string) (string, error) {
-	// 获取 ~/.config/jumpserver-client 路径
+	// 获取用户配置目录
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	currentPath := filepath.Join(configDir, "jumpserver-client")
+	currentPath := filepath.Join(configDir, config.DirectoryName())
 
 	// 确保目录存在
 	err = os.MkdirAll(currentPath, os.ModePerm)

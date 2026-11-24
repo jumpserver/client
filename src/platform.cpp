@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -13,6 +14,7 @@
 #include <QLocalSocket>
 #include <QLockFile>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QSysInfo>
@@ -403,7 +405,9 @@ QString ConfigStore::configPath() {
 #else
     const QString root = qEnvironmentVariable("XDG_CONFIG_HOME", QDir::homePath() + QStringLiteral("/.config"));
 #endif
-    return QDir(root).filePath(QStringLiteral("jumpserver-client/config.json"));
+    const QString directory = QGuiApplication::applicationDisplayName() == QLatin1String("OSMClient")
+        ? QStringLiteral("osm-client") : QStringLiteral("jumpserver-client");
+    return QDir(root).filePath(directory + QStringLiteral("/config.json"));
 }
 QJsonObject ConfigStore::merge(const QJsonObject &user, const QJsonObject &defaults) {
     QJsonObject result = defaults;
@@ -448,7 +452,26 @@ bool ConfigStore::load(QJsonObject &config) {
     if (parseError.error != QJsonParseError::NoError || !defaultsDoc.isObject()) { error_ = tr("默认应用配置格式错误"); return false; }
     const QJsonObject defaults = defaultsDoc.object();
     QFile file(path_);
-    if (!file.exists()) { config = defaults; return save(config); }
+    if (!file.exists()) {
+        if (path_ == configPath() && QGuiApplication::applicationDisplayName() == QLatin1String("OSMClient")) {
+            const QDir root(QDir::cleanPath(QFileInfo(path_).absoluteDir().absolutePath() + QStringLiteral("/..")));
+            const QString legacyPath = root.filePath(QStringLiteral("jumpserver-client/config.json"));
+            QFile legacy(legacyPath);
+            if (legacy.open(QIODevice::ReadOnly)) {
+                const auto legacyDoc = QJsonDocument::fromJson(legacy.readAll(), &parseError);
+                legacy.close();
+                if (parseError.error == QJsonParseError::NoError && legacyDoc.isObject()
+                    && legacyDoc.object().value(platformKey()).isObject()
+                    && QDir().mkpath(QFileInfo(path_).absolutePath())
+                    && QFile::copy(legacyPath, path_)) {
+                    return load(config);
+                }
+            }
+        }
+        if (QFile::exists(path_)) return load(config);
+        config = defaults;
+        return save(config);
+    }
     if (!file.open(QIODevice::ReadOnly)) { error_ = file.errorString(); return false; }
     const auto doc = QJsonDocument::fromJson(file.readAll(), &parseError);
     if (parseError.error != QJsonParseError::NoError || !doc.isObject() || !doc.object().value(platformKey()).isObject()) {
@@ -571,6 +594,9 @@ void Launcher::launch(const QString &url) {
     const QString executable = executable_.isEmpty() ? executablePath() : executable_;
     if (executable.isEmpty()) { emit failed(tr("未找到当前平台的协议启动器，请先构建或安装完整资源包")); return; }
     auto process = new QProcess(this);
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("OSMCLIENT_APP_NAME"), QGuiApplication::applicationDisplayName());
+    process->setProcessEnvironment(environment);
     process->setProgram(executable);
     process->setArguments({url});
     process->setWorkingDirectory(QFileInfo(executable).absolutePath());

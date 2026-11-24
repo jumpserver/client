@@ -73,7 +73,7 @@ Linux 安装对应发行版的 Qt 5 开发包、QtSvg、编译工具和 `libsecr
 
 安装包需先注册 `jms://`，才能从浏览器回到客户端。设置菜单与原 client 对齐，不再提供“高级”入口；既有本地回调的内部兼容能力保留。不要将账户密码或 token 写进命令行、源码或配置示例。
 
-Qt 的界面设置存于 `FIT2CLOUD/client` 的平台设置位置。Go 应用配置继续使用原 `jumpserver-client/config.json`，设置页的应用选择会同步影响使用同一配置的原客户端。配置合并保留已有应用路径/偏好，损坏的配置报错且不覆盖。
+Qt 的界面设置存于 `FIT2CLOUD/client` 的平台设置位置。应用显示名称为 `OSMClient` 时，Qt 和 Go 启动器共用 `osm-client/config.json`；其他名称使用 `jumpserver-client/config.json`。新配置不存在时，优先复制有效的旧配置，无法读取或复制时使用默认配置；旧文件保留。配置合并保留已有应用路径/偏好，损坏的配置报错且不覆盖。
 
 界面、系统应用显示名与安装器统一为 `OSMClient`。源码目录仍为 `client-qt`，构建目标、安装路径、安装文件名及配置/凭据命名空间统一为 `client`；旧 `client-qt` 命名空间不会自动迁移。
 

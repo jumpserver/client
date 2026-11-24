@@ -108,10 +108,10 @@ func runApplication(cmd *exec.Cmd, name string) {
 func removeCurRdpVncFile() {
 	re := regexp.MustCompile(`(?i)\.(rdp|vncpaxx)$`)
 	dir, _ := os.UserConfigDir()
-	rd, _ := ioutil.ReadDir(filepath.Join(dir, "jumpserver-client"))
+	rd, _ := ioutil.ReadDir(filepath.Join(dir, config.DirectoryName()))
 	for _, v := range rd {
 		if !v.IsDir() && re.MatchString(v.Name()) {
-			os.Remove(filepath.Join(dir, "jumpserver-client", v.Name()))
+			os.Remove(filepath.Join(dir, config.DirectoryName(), v.Name()))
 		}
 	}
 }
@@ -135,7 +135,7 @@ func (r *Rouse) HandleRDP(appConfig *config.AppConfig) {
 	fileName, _ := url.QueryUnescape(r.File.Name)
 	replacer := strings.NewReplacer(" ", "", ":", "_", "-", "_")
 	dir, _ := os.UserConfigDir()
-	filePath := filepath.Join(dir, "jumpserver-client", replacer.Replace(fileName)+".rdp")
+	filePath := filepath.Join(dir, config.DirectoryName(), replacer.Replace(fileName)+".rdp")
 	err := ioutil.WriteFile(filePath, []byte(r.Content), os.ModePerm)
 	if err != nil {
 		reportError(err.Error())
