@@ -375,6 +375,7 @@ def build_custom_action(compiler, destination, arch):
                    'msi.lib', 'advapi32.lib', 'kernel32.lib']
         if arch == '386':
             command.append('/EXPORT:PrepareJmsRegistration=_PrepareJmsRegistration@4')
+            command.append('/EXPORT:CloseInstalledClients=_CloseInstalledClients@4')
     else:
         entry = 'DllMain' if arch == 'amd64' else 'DllMain@12'
         command = [compiler, '-shared', '-O2', '-nostdlib', '-fno-stack-protector',

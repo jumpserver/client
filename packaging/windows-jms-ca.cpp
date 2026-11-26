@@ -2,7 +2,11 @@
 // uninstall, omit them if another application owns jms. Never edit persistent
 // MSI rows or write/delete the user's registry from this immediate action.
 #define WIN32_LEAN_AND_MEAN
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601 // QueryFullProcessImageNameW, CompareStringOrdinal
+#endif
 #include <windows.h>
+#include <tlhelp32.h>
 #include <msi.h>
 #include <msiquery.h>
 
@@ -99,4 +103,92 @@ extern "C" __declspec(dllexport) UINT __stdcall PrepareJmsRegistration(MSIHANDLE
     MsiCloseHandle(view);
     MsiCloseHandle(database);
     return status == ERROR_SUCCESS ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+}
+
+// ---------------------------------------------------------------------------
+// Close clients running from an installation that is about to be replaced or
+// removed. Immediate, scheduled after InstallValidate and before InstallInitialize
+// (deferred actions may not run before InstallInitialize, where the major
+// upgrade removes the old product). OSMCLOSEFOLDERS is "dir|dir|...". Only processes whose
+// image lies inside one of those absolute, non-root folders are closed; the
+// image name alone is never used. Failures never fail the installation: files
+// still in use are then handled by Windows Installer as usual.
+// No CRT: no large stack arrays and no aggregate zero-initialisation, which
+// could emit __chkstk/memset calls.
+
+static void logClient(MSIHANDLE session, const WCHAR *state, const WCHAR *path)
+{
+    MSIHANDLE record = MsiCreateRecord(2);
+    if (!record) return;
+    MsiRecordSetStringW(record, 0, L"OSMClient CloseInstalledClients: [1] [2]");
+    MsiRecordSetStringW(record, 1, state);
+    MsiRecordSetStringW(record, 2, path);
+    MsiProcessMessage(session, INSTALLMESSAGE_INFO, record);
+    MsiCloseHandle(record);
+}
+
+static void closeClientsUnder(MSIHANDLE session, const WCHAR *folder, WCHAR *image, DWORD imageCapacity)
+{
+    WCHAR dir[MAX_PATH + 2];
+    int length = lstrlenW(folder);
+    if (length < 4 || length > MAX_PATH - 1) return;
+    lstrcpynW(dir, folder, MAX_PATH);
+    while (length > 0 && dir[length - 1] == L'\\') --length;
+    // Absolute drive path below the root only, e.g. C:\Program Files\OSMClient.
+    if (length < 4 || dir[1] != L':' || dir[2] != L'\\') return;
+    dir[length++] = L'\\';
+    dir[length] = 0;
+    const DWORD self = GetCurrentProcessId();
+    for (int pass = 0; pass < 2; ++pass) {
+        HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snapshot == INVALID_HANDLE_VALUE) return;
+        PROCESSENTRY32W entry;
+        entry.dwSize = sizeof(entry);
+        for (BOOL ok = Process32FirstW(snapshot, &entry); ok; ok = Process32NextW(snapshot, &entry)) {
+            if (entry.th32ProcessID == 0 || entry.th32ProcessID == self) continue;
+            HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE,
+                                         FALSE, entry.th32ProcessID);
+            if (!process) continue;
+            DWORD size = imageCapacity;
+            if (QueryFullProcessImageNameW(process, 0, image, &size) && size > DWORD(length)
+                    && CompareStringOrdinal(image, length, dir, length, TRUE) == CSTR_EQUAL) {
+                if (pass == 0) {
+                    logClient(session, L"closing", image);
+                    if (TerminateProcess(process, 1)) WaitForSingleObject(process, 5000);
+                } else {
+                    logClient(session, L"still running", image);
+                }
+            }
+            CloseHandle(process);
+        }
+        CloseHandle(snapshot);
+    }
+}
+
+extern "C" __declspec(dllexport) UINT __stdcall CloseInstalledClients(MSIHANDLE session)
+{
+    DWORD length = 0;
+    WCHAR empty = 0;
+    if (MsiGetPropertyW(session, L"OSMCLOSEFOLDERS", &empty, &length) != ERROR_MORE_DATA
+            || length == 0 || length > 8192)
+        return ERROR_SUCCESS;
+    ++length;
+    const DWORD imageCapacity = 32768;
+    auto *data = static_cast<WCHAR *>(HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (length + 1) * sizeof(WCHAR)));
+    auto *image = static_cast<WCHAR *>(HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, imageCapacity * sizeof(WCHAR)));
+    if (data && image && MsiGetPropertyW(session, L"OSMCLOSEFOLDERS", data, &length) == ERROR_SUCCESS) {
+        WCHAR *segment = data;
+        for (WCHAR *p = data;; ++p) {
+            const bool last = *p == 0;
+            if (last || *p == L'|') {
+                *p = 0;
+                closeClientsUnder(session, segment, image, imageCapacity);
+                if (last) break;
+                segment = p + 1;
+            }
+        }
+    }
+    if (image) HeapFree(GetProcessHeap(), 0, image);
+    if (data) HeapFree(GetProcessHeap(), 0, data);
+    return ERROR_SUCCESS;
 }

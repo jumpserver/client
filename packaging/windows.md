@@ -48,7 +48,14 @@ Qt 的部署工具不负责所有第三方依赖，参见 [Qt 5.15 Windows deplo
 
 ## 安装、卸载与兼容性边界
 
-两种格式默认安装到系统 `Program Files/OSMClient`，需要管理员权限，创建 `OSMClient` 开始菜单和公共桌面快捷方式并注册 `jms://`，可执行文件为 `client.exe`。旧用户级版本需先卸载，用户配置保留；安装器标题和应用列表显示名为 `OSMClient`。EXE 与 MSI 不能同时管理同一目录；切换安装格式前需卸载旧格式。NSIS 升级先调用上一版本自己的卸载器；MSI 使用同一 UpgradeCode、在安装新文件前执行 major upgrade，旧快捷方式由旧包卸载。用户配置和系统凭据库不在卸载文件清单中。
+两种格式默认安装到系统 `Program Files/OSMClient`，需要管理员权限，创建 `OSMClient` 开始菜单和公共桌面快捷方式并注册 `jms://`，可执行文件为 `client.exe`。安装器标题和应用列表显示名为 `OSMClient`。EXE 与 MSI 不能同时管理同一目录，安装时会自动替换已有安装，用户配置保留：
+
+- EXE 启动时检查已有 EXE、MSI 和旧用户级（`OSMClientQt`）安装目录，按完整路径找出从这些目录运行的进程（客户端、Go helper、PuTTY），交互安装先询问再关闭，`/S` 静默安装直接关闭；关不掉则停止安装。随后依次卸载旧用户级 EXE、同一 UpgradeCode 的 MSI（`msiexec /x <ProductCode> /qn`），再调用上一版 EXE 自己的卸载器。EXE 卸载器同样先关闭从安装目录运行的进程。
+- MSI 在 `InstallValidate` 之后、`InstallInitialize` 之前由 `windows-jms-ca.cpp` 的 `CloseInstalledClients`（立即执行的原生 Toolhelp 枚举；major upgrade 紧跟 `InstallInitialize` 删除旧产品，延迟执行的动作不能排在它之前）关闭从本次安装目录、旧 MSI 目录和 EXE 目录运行的进程，升级、替换 EXE 和卸载时都会执行；关不掉不会让安装失败，由 Windows Installer 按文件占用处理。不用 PowerShell：SYSTEM 身份下的进程查询实测拿不到结果。
+- MSI 使用同一 UpgradeCode、在安装新文件前执行 major upgrade，旧快捷方式由旧包卸载；已有 EXE 安装时，在 `InstallFiles` 前以 SYSTEM 身份静默运行其卸载器。该卸载不在 MSI 回滚范围内：之后的 MSI 步骤失败时旧 EXE 不会恢复。
+- 无法自动卸载的情况（旧用户级安装没有 `Uninstall.exe`、其他 UpgradeCode 的用户级 MSI）仍提示手动卸载。
+
+进程用 Toolhelp 枚举、按完整路径匹配（EXE 通过 NSIS System 插件，MSI 通过保护 DLL），不按 `client.exe` 进程名结束其他程序，也不依赖 PowerShell（CI 实测有客户端运行时查询拿不到结果）；EXE 关不掉时停止安装，MSI 交给 Windows Installer 按文件占用处理。安装器把检查目录、找到和剩余的进程数写入 `%TEMP%\OSMClient-setup.log`。用户配置和系统凭据库不在卸载文件清单中。
 
 NSIS 仅删除生成清单中的文件，不递归清空用户选择的目录。NSIS 卸载前比较当前 `jms` command；MSI 通过 `windows-jms-ca.cpp` 在 `RemoveRegistryValues` 前检查同一条件。MSI 不持久化共享 `jms` 的 Registry 行：安装/修复时临时添加四行，由标准动作写入；卸载时仅在仍属本程序的情况下添加临时行供标准动作移除，其他客户端已接管则不添加。这样仍由 MSI 标准动作管理回滚，CA 不改持久表行、不直接修改注册表。依据 [Microsoft 当前安装会话限制](https://learn.microsoft.com/en-us/windows/win32/msi/accessing-the-current-installer-session-from-inside-a-custom-action) 和 [RemoveRegistryValues action](https://learn.microsoft.com/en-us/windows/win32/msi/removeregistryvalues-action)。卸载不会自动恢复安装前的旧协议处理器。
 
@@ -61,7 +68,7 @@ MSI 的 ICE 一致性校验限定了 authoring 位置，只用结构调整满足
 
 当前 macOS 开发机已验证两架构 NSIS 模板编译及保护 DLL 的 x86/x64 交叉编译；验证安装器使用显式 synthetic payload 并自动删除。**Windows Qt 部署、最终 WiX 编译、真实 PFX 签名、安装/升级/卸载、协议接管保护和旧 Windows 实机运行仍需 Windows 环境验证。**
 
-CI 使用 Qt 5.15.19 源码和 Schannel（`--native-tls`）、VS2022、NSIS 3.10、WiX 3.14.1。工作流构建之后调用以下检查：分别静默安装 EXE/MSI，运行已安装程序 smoke test，再验证正常卸载与另一客户端接管 `jms` 后卸载的保留行为。此脚本会改测试注册表，仅允许无预存安装/`jms` 注册的 GitHub 托管一次性 Windows runner；提供脚本不表示已在本机执行通过。
+CI 使用 Qt 5.15.19 源码和 Schannel（`--native-tls`）、VS2022、NSIS 3.10、WiX 3.14.1。工作流构建之后调用以下检查：分别静默安装 EXE/MSI，运行已安装程序 smoke test，再验证正常卸载与另一客户端接管 `jms` 后卸载的保留行为；最后在客户端运行时依次验证 EXE→MSI、MSI→EXE、EXE→EXE 替换和卸载，确认运行中的进程被关闭、旧安装登记被清除。此脚本会改测试注册表，仅允许无预存安装/`jms` 注册的 GitHub 托管一次性 Windows runner；提供脚本不表示已在本机执行通过。
 
 ```powershell
 ./packaging/windows/verify-installed.ps1 -Dist dist -Arch amd64

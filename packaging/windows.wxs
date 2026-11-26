@@ -15,10 +15,13 @@
       <RegistrySearch Id="FindNsisInstall" Root="HKLM" Win64="no" Type="raw"
                       Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\OSMClient" Name="InstallLocation" />
     </Property>
+    <Property Id="MSIINSTALL" Secure="yes">
+      <RegistrySearch Id="FindMsiInstall" Root="HKLM" Win64="no" Type="raw"
+                      Key="Software\FIT2CLOUD\OSMClient" Name="WindowsInstaller" />
+    </Property>
     <Property Id="LEGACYNSIS" Secure="yes"><RegistrySearch Id="FindLegacyNsis" Root="HKCU" Win64="no" Type="raw" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\OSMClientQt" Name="InstallLocation" /></Property>
     <Property Id="LEGACYMSI" Secure="yes"><RegistrySearch Id="FindLegacyMsi" Root="HKCU" Win64="no" Type="raw" Key="Software\FIT2CLOUD\OSMClientQt" Name="WindowsInstaller" /></Property>
     <Condition Message="Uninstall the previous per-user OSMClient before installing this version.">Installed OR (NOT LEGACYNSIS AND NOT LEGACYMSI)</Condition>
-    <Condition Message="Uninstall the existing EXE package before installing the MSI package.">Installed OR NOT NSISINSTALL</Condition>
     <Condition Message="This installer requires Windows 7 or later; the packaged Qt/CRT/Go build may require a newer system.">Installed OR VersionNT &gt;= 601</Condition>
     <Directory Id="TARGETDIR" Name="SourceDir">
       <!-- Registry-only components install no files, so their directory is only the MSI
@@ -59,8 +62,28 @@
          Other applications' jms values never become uninstall targets. -->
     <CustomAction Id="PrepareJmsRegistration" BinaryKey="ProtocolGuard" DllEntry="PrepareJmsRegistration"
                   Execute="immediate" Return="check" />
+    <!-- Replace an EXE (NSIS) installation: run its own uninstaller silently before the
+         MSI writes files. Its un.onInit closes a client running from that folder. _?= keeps
+         the uninstaller in-process so the exit code is final; the leftover uninstaller and
+         the emptied folder are removed only when it succeeded (&amp;&amp;). The command line
+         is formatted when the script is generated, so NSISINSTALL is available here. -->
+    <CustomAction Id="RemoveNsisInstall" Directory="TARGETDIR" Execute="deferred" Impersonate="no" Return="check"
+                  ExeCommand='"[SystemFolder]cmd.exe" /d /c ""[NSISINSTALL]\Uninstall.exe" /S _?=[NSISINSTALL]&amp;&amp; (del /f /q "[NSISINSTALL]\Uninstall.exe" &amp; rd "[NSISINSTALL]" 2&gt;nul &amp; exit /b 0)"' />
+    <!-- Close clients running from this, the previous MSI or the EXE installation before
+         anything is removed (upgrade, EXE replacement, uninstall). Native code: PowerShell
+         process queries are unreliable when Windows Installer runs them as SYSTEM.
+         Immediate and before InstallInitialize: with afterInstallInitialize the major
+         upgrade removes the old product right after it, and deferred actions are not
+         allowed earlier. -->
+    <CustomAction Id="SetCloseInstalledClientsData" Property="OSMCLOSEFOLDERS"
+                  Value="[INSTALLFOLDER]|[NSISINSTALL]|[MSIINSTALL]" />
+    <CustomAction Id="CloseInstalledClients" BinaryKey="ProtocolGuard" DllEntry="CloseInstalledClients"
+                  Execute="immediate" Return="ignore" />
     <InstallExecuteSequence>
       <Custom Action="PrepareJmsRegistration" Before="RemoveRegistryValues">1</Custom>
+      <Custom Action="SetCloseInstalledClientsData" After="CostFinalize">1</Custom>
+      <Custom Action="CloseInstalledClients" After="InstallValidate">1</Custom>
+      <Custom Action="RemoveNsisInstall" Before="InstallFiles">NSISINSTALL AND NOT Installed</Custom>
     </InstallExecuteSequence>
     <Feature Id="Complete" Title="OSMClient" Level="1">
       <ComponentGroupRef Id="PayloadComponents" />
