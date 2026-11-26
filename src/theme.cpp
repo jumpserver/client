@@ -55,7 +55,12 @@ protected:
     auto *button = qobject_cast<QAbstractButton *>(watched);
     const auto *mouse = static_cast<QMouseEvent *>(event);
     if (!button || mouse->button() != Qt::LeftButton || !button->text().isEmpty()) return false;
-    if (button->property("iconOnly").toBool() || !button->icon().isNull()) button->clearFocus();
+    if (!button->property("iconOnly").toBool() && button->icon().isNull()) return false;
+    // This application-wide filter runs before QAbstractButton::mouseReleaseEvent.
+    // Where buttons take click focus (Windows, most Linux styles), clearing focus
+    // now triggers focusOutEvent, which resets the pressed state, so the release
+    // is ignored and clicked() never fires. Drop focus after the click instead.
+    QTimer::singleShot(0, button, [button] { button->clearFocus(); });
     return false;
   }
 };
