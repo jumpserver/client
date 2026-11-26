@@ -895,19 +895,10 @@ void MainWindow::buildUi() {
   auto *side = new QVBoxLayout(sidebar);
   side->setContentsMargins(12, 12, 12, 10);
   side->setSpacing(10);
-  auto *brandRow = new QHBoxLayout;
-  brandRow->setSpacing(8);
-  auto *brandIcon = new QLabel;
-  brandIcon->setFixedSize(20, 20);
-  brandIcon->setPixmap(QIcon(QStringLiteral(":/icons/icon.png")).pixmap(20, 20));
-  brandIcon->setAlignment(Qt::AlignCenter);
-  brandRow->addWidget(brandIcon);
-  auto *brand = new QLabel("OSMClient");
-  brand->setObjectName("brandName");
-  brandRow->addWidget(brand, 1);
+  // The native title bar already shows the product name and icon, so the
+  // sidebar starts with search. The collapse toggle lives at the leading edge
+  // of the top bar, where it stays put in both sidebar widths.
   m_collapse = iconButton("sidebar", "sidebarToggle");
-  brandRow->addWidget(m_collapse);
-  side->addLayout(brandRow);
   m_search = new AssetSearch;
   m_search->setObjectName("assetSearch");
   side->addWidget(m_search);
@@ -983,11 +974,9 @@ void MainWindow::buildUi() {
   profileRow->addWidget(m_logout);
   connect(m_logout, &QPushButton::clicked, m_service, &AppService::logout);
   side->addWidget(profilePanel);
-  connect(m_collapse, &QPushButton::clicked, this, [this, sidebar, brand, brandIcon] {
+  connect(m_collapse, &QPushButton::clicked, this, [this, sidebar] {
     m_collapsed = !m_collapsed;
     sidebar->setFixedWidth(m_collapsed ? 75 : 220);
-    brand->setVisible(!m_collapsed);
-    brandIcon->setVisible(!m_collapsed);
     m_search->setVisible(!m_collapsed);
     m_catalogLabel->setVisible(!m_collapsed);
     m_profile->setVisible(!m_collapsed);
@@ -1004,8 +993,9 @@ void MainWindow::buildUi() {
   topbar->setObjectName("topbar");
   topbar->setFixedHeight(48);
   auto *top = new QHBoxLayout(topbar);
-  top->setContentsMargins(22, 0, 16, 0);
+  top->setContentsMargins(10, 0, 16, 0);
   top->setSpacing(12);
+  top->addWidget(m_collapse);
   m_organizations = new ClientTheme::ComboBox;
   m_organizations->setObjectName("organizationSelector");
   m_organizations->setSizeAdjustPolicy(QComboBox::AdjustToContents);

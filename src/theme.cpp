@@ -400,7 +400,6 @@ QLabel[role=dialogTitle] { font-size: 19px; font-weight: 600; }
 QLabel[role=sectionTitle] { font-size: 14px; font-weight: 600; }
 QLabel[role=validation] { color: @muted@; padding: 2px 0; }
 QLabel#approvalCountdown { color: @approvalCountdown@; font-weight: 600; }
-QLabel#brandName { font-size: 14px; font-weight: 600; }
 QLabel#welcomeTitle { font-size: 22px; font-weight: 600; }
 QFrame#sidebar, QFrame#settingsSidebar { background: @sidebar@; border: none; border-right: 1px solid @border@; }
 QFrame#topbar { background: @panel@; border: none; border-bottom: 1px solid @border@; }
