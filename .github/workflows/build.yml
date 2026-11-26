@@ -345,7 +345,7 @@ jobs:
   # Kylin V10 SP1 ships Qt 5.12 (5.12.12), so the Debian 11 / Qt 5.15.2 package
   # cannot be installed there. Build a separate arm64 DEB against a Qt 5.12
   # baseline; the package keeps the client identity but a distinct file name.
-  linux-kylin:
+  linux-kylin-desktop:
     needs: metadata
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
@@ -387,7 +387,7 @@ jobs:
                 --cmake-arg "CLIENT_PACKAGE_VARIANT=$PACKAGE_VARIANT"
           '
       - name: Record installer size
-        run: python scripts/report-package-sizes.py dist --platform linux-kylin --arch "$TARGET_ARCH" --extension deb
+        run: python scripts/report-package-sizes.py dist --platform linux-kylin-desktop --arch "$TARGET_ARCH" --extension deb
       - name: Install and smoke-test in a Qt 5.12 runtime container
         run: |
           docker run --rm --platform "linux/$TARGET_ARCH" -v "$PWD:/src:ro" -v "$PWD/dist:/out:ro" "$BUILD_IMAGE" sh -ec '
@@ -405,7 +405,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  linux-kylin-rpm:
+  linux-kylin-server:
     needs: metadata
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -433,13 +433,13 @@ jobs:
               sh /src/packaging/linux/setup-kylin-qt511.sh
               python3.9 /src/scripts/package-linux.py --format rpm --build /tmp/build --output /out \
                 --helpers /helpers --parallel 3 --cmake-arg "CLIENT_VERSION=$CLIENT_VERSION" \
-                --cmake-arg CLIENT_QT5_MIN_VERSION=5.11 --cmake-arg CLIENT_PACKAGE_VARIANT=kylin
+                --cmake-arg CLIENT_QT5_MIN_VERSION=5.11 --cmake-arg CLIENT_PACKAGE_VARIANT=kylin_server
           '
       - name: Record installer size
-        run: python scripts/report-package-sizes.py dist --platform linux-kylin --arch amd64 --extension rpm
+        run: python scripts/report-package-sizes.py dist --platform linux-kylin-server --arch amd64 --extension rpm
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: OSMClient-${{ needs.metadata.outputs.version }}-linux-amd64-kylin-rpm
+          name: OSMClient-${{ needs.metadata.outputs.version }}-linux-amd64-kylin-server
           path: |
             dist/*.rpm
             dist/*.manifest.json
@@ -448,7 +448,7 @@ jobs:
           retention-days: 14
 
   release:
-    needs: [metadata, macos, windows, linux, linux-kylin, linux-kylin-rpm]
+    needs: [metadata, macos, windows, linux, linux-kylin-desktop, linux-kylin-server]
     if: (github.ref == 'refs/heads/osm-qt' || github.base_ref == 'osm-qt' || github.ref_type == 'tag') && (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     permissions:
@@ -482,7 +482,7 @@ jobs:
             echo "Missing Kylin V10 SP1 arm64 DEB installer" >&2
             exit 1
           }
-          test -f "release-assets/OSMClient-${CLIENT_VERSION}-kylin-amd64.rpm" || {
+          test -f "release-assets/OSMClient-${CLIENT_VERSION}-kylin_server-amd64.rpm" || {
             echo "Missing Kylin V10 SP3 amd64 RPM installer" >&2
             exit 1
           }
