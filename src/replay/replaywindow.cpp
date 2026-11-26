@@ -36,6 +36,22 @@
 #include <QAudioOutput>
 #endif
 
+// Qt 5 on Windows: QVideoWidget renders through the WMF EVR video window, a
+// native child HWND whose display rect is only refreshed on resize. Inside the
+// replay stage it stays covered by the Qt-painted background (white in light
+// theme, dark in dark theme) until a layout change, such as hiding the
+// playlist, resizes it. Receive frames through a video surface and paint them
+// with the same Canvas used for Guacamole playback, so no native child window
+// is involved. Define CLIENT_REPLAY_SURFACE_VIDEO to exercise this path on
+// other Qt 5 platforms; set OSM_REPLAY_NATIVE_VIDEO=1 to fall back at runtime.
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0) && QT_VERSION >= QT_VERSION_CHECK(5, 15, 0) && (defined(Q_OS_WIN) || defined(CLIENT_REPLAY_SURFACE_VIDEO))
+#define CLIENT_REPLAY_SURFACE_VIDEO_ENABLED 1
+#include <QAbstractVideoSurface>
+#include <QPointer>
+#include <QVideoFrame>
+#include <QVideoSurfaceFormat>
+#endif
+
 namespace Replay {
 namespace {
 using ClientTheme::text;
@@ -56,6 +72,42 @@ public:
 private:
   QImage m_image;
 };
+
+#ifdef CLIENT_REPLAY_SURFACE_VIDEO_ENABLED
+class FrameSurface : public QAbstractVideoSurface {
+public:
+  FrameSurface(Canvas *target, QObject *parent) : QAbstractVideoSurface(parent), m_target(target) {}
+  QList<QVideoFrame::PixelFormat> supportedPixelFormats(
+      QAbstractVideoBuffer::HandleType type) const override {
+    if (type != QAbstractVideoBuffer::NoHandle) return {};
+    return {QVideoFrame::Format_RGB32, QVideoFrame::Format_ARGB32,
+            QVideoFrame::Format_ARGB32_Premultiplied, QVideoFrame::Format_RGB24,
+            QVideoFrame::Format_RGB565, QVideoFrame::Format_RGB555,
+            QVideoFrame::Format_NV12, QVideoFrame::Format_YUV420P,
+            QVideoFrame::Format_YV12, QVideoFrame::Format_YUYV, QVideoFrame::Format_UYVY};
+  }
+  bool start(const QVideoSurfaceFormat &format) override {
+    m_bottomUp = format.scanLineDirection() == QVideoSurfaceFormat::BottomToTop;
+    return QAbstractVideoSurface::start(format);
+  }
+  bool present(const QVideoFrame &frame) override {
+    // QVideoFrame::image() maps the frame and returns a deep copy, so the
+    // image stays valid on the GUI thread after the backend recycles the frame.
+    QImage image = frame.image();
+    if (image.isNull()) return true;
+    if (m_bottomUp) image = image.mirrored();
+    QPointer<Canvas> target = m_target;
+    if (!target) return false;
+    QMetaObject::invokeMethod(target, [target, image] {
+      if (target) target->setFrame(image);
+    }, Qt::QueuedConnection);
+    return true;
+  }
+private:
+  QPointer<Canvas> m_target;
+  bool m_bottomUp = false;
+};
+#endif
 
 class PlayOverlay : public QWidget {
 public:
@@ -451,7 +503,18 @@ struct Window::Private {
 
   void ensureMedia() {
     if (player) return;
+#ifdef CLIENT_REPLAY_SURFACE_VIDEO_ENABLED
+    const bool nativeVideo = qEnvironmentVariableIntValue("OSM_REPLAY_NATIVE_VIDEO") == 1;
+    Canvas *videoCanvas = nativeVideo ? nullptr : new Canvas(screens);
+    if (videoCanvas) {
+      videoCanvas->setObjectName("replayVideoCanvas");
+      video = videoCanvas;
+    } else {
+      video = new QVideoWidget(screens);
+    }
+#else
     video = new QVideoWidget(screens);
+#endif
     videoOverlay = new PlayOverlay(video);
     video->installEventFilter(w);
     screens->addWidget(video);
@@ -468,7 +531,12 @@ struct Window::Private {
     });
     QObject::connect(player, QOverload<QMediaPlayer::Error>::of(&QMediaPlayer::error), w, [this] { mediaError(); });
 #endif
-    player->setVideoOutput(video);
+#ifdef CLIENT_REPLAY_SURFACE_VIDEO_ENABLED
+    if (videoCanvas) player->setVideoOutput(new FrameSurface(videoCanvas, player));
+    else player->setVideoOutput(static_cast<QVideoWidget *>(video));
+#else
+    player->setVideoOutput(static_cast<QVideoWidget *>(video));
+#endif
     QObject::connect(player, &QMediaPlayer::positionChanged, w, [this](qint64 ms) { if (isMp4()) setPosition(ms); });
     QObject::connect(player, &QMediaPlayer::durationChanged, w, [this](qint64 ms) { if (isMp4()) setDuration(ms); });
     QObject::connect(player, &QMediaPlayer::seekableChanged, w, [this] { refreshControls(); });
@@ -640,6 +708,8 @@ struct Window::Private {
     updateDetails();
     screens->setCurrentWidget(dropZone);
     canvas->setFrame({});
+    // Drop the previous MP4's last frame when the video is painted by Canvas.
+    if (auto *videoCanvas = dynamic_cast<Canvas *>(video)) videoCanvas->setFrame({});
     external->hide();
     status->setText(path.isEmpty() ? QString() : text("正在读取录像…", "Reading recording…"));
     startImport();
@@ -767,7 +837,7 @@ struct Window::Private {
   PlayOverlay *canvasOverlay, *videoOverlay = nullptr;
   QWidget *dropZone;
   QStackedWidget *screens, *playlistPages;
-  QVideoWidget *video = nullptr;
+  QWidget *video = nullptr;
   QMediaPlayer *player = nullptr;
   QSlider *seek;
   QComboBox *speed;
