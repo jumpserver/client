@@ -3,7 +3,7 @@ name = "jumpserver-client"
 version = "4.1.2"
 description = "JumpServer client tool"
 authors = [ "JumpServer" ]
-license = "MIT"
+license = "GPL-3.0-or-later"
 repository = "https://github.com/jumpserver/clients"
 edition = "2021"
 
